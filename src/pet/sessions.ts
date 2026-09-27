@@ -10,10 +10,14 @@ import type { Session, Settings } from "../shared/types";
 
 const MIN = 60_000;
 
+const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+
 export interface SessionHost {
   settings(): Settings;
   say(text: string, action?: { label: string; run: () => void }): void;
   celebrate(): void;
+  /** Before a pomodoro or focus session starts: be visible (out of meeting mode). */
+  showUp(): Promise<void>;
   /** The session changed (or a second passed): redraw the timer, posture, etc. */
   changed(session: Session | null): void;
 }
@@ -45,12 +49,14 @@ export class Sessions {
   }
 
   async startPomodoro(minutes: number) {
+    await this.host.showUp();
     const lock = this.host.settings().pomodoro.lockApps;
     await this.replace({ kind: "pomodoro", startedAt: Date.now(), endsAt: Date.now() + minutes * MIN, lock });
     this.host.say(lines.pomodoroStart(minutes, lock && this.hasApps()));
   }
 
   async startFocus() {
+    await this.host.showUp();
     await this.replace({ kind: "focus", startedAt: Date.now(), lock: true });
     this.host.say(this.hasApps() ? lines.FOCUS_ON : "专注模式开启！我先不打扰你～");
   }
@@ -70,8 +76,19 @@ export class Sessions {
   remaining(now = Date.now()): string | null {
     const end = this.current?.endsAt;
     if (!end) return null;
-    const s = Math.max(0, Math.ceil((end - now) / 1000));
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    return clock(Math.max(0, Math.ceil((end - now) / 1000)));
+  }
+
+  /** How long this session has run, "12:34". */
+  elapsed(now = Date.now()): string {
+    return clock(Math.max(0, Math.floor((now - (this.current?.startedAt ?? now)) / 1000)));
+  }
+
+  /** How much of a timed session is done, 0…1 (0 for open-ended focus). */
+  progress(now = Date.now()): number {
+    const s = this.current;
+    if (!s?.endsAt) return 0;
+    return Math.min(1, Math.max(0, (now - s.startedAt) / (s.endsAt - s.startedAt)));
   }
 
   private hasApps() {

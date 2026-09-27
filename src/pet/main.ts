@@ -92,6 +92,8 @@ const sessions = new Sessions({
   settings: () => settings,
   say: (text, action) => speak(text, action),
   celebrate: () => play("jumping", 2),
+  // You asked for a timer: come out of meeting mode to show it.
+  showUp: () => motion.untuck(),
   changed: (s) => onSessionChanged(s),
 });
 
@@ -297,8 +299,20 @@ function applyMood() {
   if (current.level === "soon" || current.level === "urgent") badge.textContent = String(count);
   else if (current.level === "overdue") badge.textContent = "!";
   const open = openDeadlines(items, done).filter((i) => i.start >= Date.now() - 3 * DAY && i.start <= Date.now() + 7 * DAY);
-  dot.textContent = open.length ? String(open.length) : "";
-  dot.title = open.length ? `这周还有 ${open.length} 个要交` : "这周没有要交的";
+  // Tucked away during a pomodoro or focus session, the dot keeps the time instead.
+  const s = sessions.current;
+  dot.dataset.session = s?.kind ?? "";
+  if (s?.kind === "pomodoro" || s?.kind === "break") {
+    const minutes = Math.ceil(((s.endsAt ?? Date.now()) - Date.now()) / 60_000);
+    dot.textContent = s.kind === "break" ? "☕" : `${minutes}′`;
+    dot.title = `${s.kind === "break" ? "休息" : "番茄钟"}还剩 ${sessions.remaining()}`;
+  } else if (s?.kind === "focus") {
+    dot.textContent = "🔒";
+    dot.title = `专注了 ${sessions.elapsed()}`;
+  } else {
+    dot.textContent = open.length ? String(open.length) : "";
+    dot.title = open.length ? `这周还有 ${open.length} 个要交` : "这周没有要交的";
+  }
   const show = !motion.tucked && ["soon", "urgent", "overdue"].includes(current.level);
   if (show !== badge.classList.contains("show")) {
     badge.classList.toggle("show", show);
@@ -334,9 +348,11 @@ async function refresh() {
 
 function onSessionChanged(s: Session | null) {
   const left = sessions.remaining();
-  const label = !s ? "" : s.kind === "pomodoro" ? `🍅 ${left}` : s.kind === "break" ? `☕ ${left}` : "🔒 专注中";
+  const label = !s ? "" : s.kind === "pomodoro" ? `🍅 ${left}` : s.kind === "break" ? `☕ ${left}` : `🔒 专注 ${sessions.elapsed()}`;
   timer.textContent = label;
   timer.dataset.kind = s?.kind ?? "";
+  // The pill fills up as the pomodoro (or break) goes by.
+  timer.style.setProperty("--done", `${(sessions.progress() * 100).toFixed(1)}%`);
   const show = !!s && !motion.tucked;
   if (show !== timer.classList.contains("show")) {
     timer.classList.toggle("show", show);

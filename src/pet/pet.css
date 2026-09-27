@@ -182,8 +182,14 @@ body.preview #stage {
   opacity: 1;
   pointer-events: auto;
 }
+.timer[data-kind="pomodoro"] {
+  background: linear-gradient(to right, #ffd9cf var(--done, 0%), var(--paper) var(--done, 0%));
+}
 .timer[data-kind="break"] {
-  background: #e3f4ea;
+  background: linear-gradient(to right, #cdeedb var(--done, 0%), #eef9f2 var(--done, 0%));
+}
+.timer[data-kind="focus"] {
+  background: #e8e4fb;
 }
 
 /* Meeting mode: tucked at a screen edge, just a dot showing how many things are due this week */
@@ -212,6 +218,15 @@ body.preview #stage {
 }
 .peek-dot[data-level="urgent"] {
   background: var(--rose);
+}
+.peek-dot[data-session="pomodoro"] {
+  background: #ffd9cf;
+}
+.peek-dot[data-session="break"] {
+  background: #cdeedb;
+}
+.peek-dot[data-session="focus"] {
+  background: #e8e4fb;
 }
 /* Something was said while muted: a slow, quiet pulse. */
 .peek-dot.news {
