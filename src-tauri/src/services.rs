@@ -29,8 +29,10 @@ const ED_REGIONS: &[(&str, &str)] = &[
     ("au", "https://edstem.org/api"),
 ];
 const ED_TOKEN: &str = "ed-token";
-const USER_AGENT: &str =
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) StudyPet/0.1";
+const USER_AGENT: &str = concat!(
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) StudyPet/",
+    env!("CARGO_PKG_VERSION")
+);
 const MAX_PAGE_BYTES: usize = 8 * 1024 * 1024;
 
 struct Service {

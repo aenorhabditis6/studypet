@@ -45,7 +45,7 @@ fn fetch_error(url: &str, e: reqwest::Error) -> String {
 async fn fetch_ics(url: &str) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(25))
-        .user_agent("StudyPet/0.1")
+        .user_agent(concat!("StudyPet/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| e.to_string())?;
     let resp = client.get(url).send().await.map_err(|e| fetch_error(url, e))?;
