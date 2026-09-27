@@ -42,6 +42,12 @@ npx tauri build --bundles app
 scripts/release.sh 0.2.0 "这一版改了什么"
 ```
 
+看有多少人下载（每个版本 zip 的下载次数、最近 14 天下载页的访问和来源，并和上次查看比较）：
+
+```bash
+scripts/stats.sh
+```
+
 只看界面（浏览器预览，用假数据）：`npm run dev`，然后打开 `http://localhost:1420/`（宠物，右边有调试按钮）、`/panel.html`（今日）、`/panel.html?fresh`（新手引导）。
 
 ## 测试
