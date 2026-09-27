@@ -1,0 +1,26 @@
+{
+  "name": "studypet",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "test": "tsc && node scripts/check-ics.ts && node --import ./scripts/ts-resolve.mjs scripts/check-services.ts && cd src-tauri && cargo test"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.8.0",
+    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-store": "^2.5.0",
+    "ical.js": "^2.2.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "linkedom": "^0.18.13",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.16"
+  }
+}
