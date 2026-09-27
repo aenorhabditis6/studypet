@@ -10,6 +10,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 const DEFAULT_SHEET: &[u8] = include_bytes!("../resources/pets/cloudbun/spritesheet.webp");
 const DEFAULT_MANIFEST: &str = include_str!("../resources/pets/cloudbun/pet.json");
+/// The second built-in pet: a single picture the app cuts out and animates.
+const NAIDAN_IMAGE: &[u8] = include_bytes!("../resources/pets/naidan/naidan.jpg");
 const MAX_IMAGE_BYTES: u64 = 25 * 1024 * 1024;
 const IMAGE_EXTS: &[&str] = &["png", "webp", "gif", "jpg", "jpeg"];
 
@@ -26,6 +28,9 @@ pub struct PetInfo {
     pub sprite_version: Option<u64>,
     /// "default" | "codex" | "upload"
     pub origin: String,
+    /// For pictures: "cutout" (remove the background, animated face) or "original" (as is).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -66,11 +71,15 @@ pub fn get_pet_image(app: AppHandle) -> Result<tauri::ipc::Response, String> {
     Ok(tauri::ipc::Response::new(bytes))
 }
 
-/// Imports a Codex pet folder, a `pet.json`, or a single image file.
+/// Imports a Codex pet folder, a `pet.json`, or a single image file. `mode` applies to
+/// pictures: "cutout" (default) or "original".
 #[tauri::command]
-pub fn import_pet(app: AppHandle, path: String, origin: Option<String>) -> Result<PetInfo, String> {
+pub fn import_pet(app: AppHandle, path: String, origin: Option<String>, mode: Option<String>) -> Result<PetInfo, String> {
     let origin = origin.unwrap_or_else(|| "upload".into());
-    let (info, image) = read_pet(Path::new(&path), &origin)?;
+    let (mut info, image) = read_pet(Path::new(&path), &origin)?;
+    if info.kind == "image" {
+        info.mode = Some(picture_mode(mode.as_deref())?);
+    }
     let info = install(&pet_dir(&app)?, info, &image)?;
     let _ = app.emit("pet-changed", &info);
     Ok(info)
@@ -98,19 +107,63 @@ fn looks_generated(stem: &str) -> bool {
     camera || (stem.len() >= 12 && digits >= 4) || stem.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
 }
 
+/// Switches a picture pet between "cutout" and "original".
 #[tauri::command]
-pub fn use_default_pet(app: AppHandle) -> Result<PetInfo, String> {
-    let json: Value = serde_json::from_str(DEFAULT_MANIFEST).map_err(|e| e.to_string())?;
-    let info = PetInfo {
-        kind: "codex-atlas".into(),
-        name: str_field(&json, "displayName").unwrap_or_else(|| "Cloudbun".into()),
-        description: str_field(&json, "description"),
-        image_file: "sprite.webp".into(),
-        mime: "image/webp".into(),
-        sprite_version: json.get("spriteVersionNumber").and_then(Value::as_u64),
-        origin: "default".into(),
+pub fn set_pet_mode(app: AppHandle, mode: String) -> Result<PetInfo, String> {
+    let mut info = read_manifest(&app).ok_or("还没有设置宠物")?;
+    if info.kind != "image" {
+        return Err("只有单张图片的宠物能切换这个".into());
+    }
+    info.mode = Some(picture_mode(Some(&mode))?);
+    let manifest = serde_json::to_vec_pretty(&info).map_err(|e| e.to_string())?;
+    fs::write(pet_dir(&app)?.join("manifest.json"), manifest).map_err(|e| e.to_string())?;
+    let _ = app.emit("pet-changed", &info);
+    Ok(info)
+}
+
+fn picture_mode(mode: Option<&str>) -> Result<String, String> {
+    match mode.unwrap_or("cutout") {
+        m @ ("cutout" | "original") => Ok(m.to_string()),
+        other => Err(format!("unknown picture mode: {other}")),
+    }
+}
+
+/// One of the built-in pets: "cloudbun" (default) or "naidan".
+#[tauri::command]
+pub fn use_default_pet(app: AppHandle, id: Option<String>) -> Result<PetInfo, String> {
+    let (info, bytes) = match id.as_deref().unwrap_or("cloudbun") {
+        "naidan" => (
+            PetInfo {
+                kind: "image".into(),
+                name: "奶蛋".into(),
+                description: Some("一颗圆滚滚的黄色小蛋".into()),
+                image_file: "image.jpg".into(),
+                mime: "image/jpeg".into(),
+                sprite_version: None,
+                origin: "default".into(),
+                mode: Some("cutout".into()),
+            },
+            NAIDAN_IMAGE,
+        ),
+        "cloudbun" => {
+            let json: Value = serde_json::from_str(DEFAULT_MANIFEST).map_err(|e| e.to_string())?;
+            (
+                PetInfo {
+                    kind: "codex-atlas".into(),
+                    name: str_field(&json, "displayName").unwrap_or_else(|| "Cloudbun".into()),
+                    description: str_field(&json, "description"),
+                    image_file: "sprite.webp".into(),
+                    mime: "image/webp".into(),
+                    sprite_version: json.get("spriteVersionNumber").and_then(Value::as_u64),
+                    origin: "default".into(),
+                    mode: None,
+                },
+                DEFAULT_SHEET,
+            )
+        }
+        other => return Err(format!("unknown built-in pet: {other}")),
     };
-    let info = install(&pet_dir(&app)?, info, DEFAULT_SHEET)?;
+    let info = install(&pet_dir(&app)?, info, bytes)?;
     let _ = app.emit("pet-changed", &info);
     Ok(info)
 }
@@ -195,6 +248,7 @@ fn read_codex(manifest: &Path, origin: &str) -> Result<(PetInfo, Vec<u8>), Strin
         mime: mime_for(&ext).into(),
         sprite_version: json.get("spriteVersionNumber").and_then(Value::as_u64),
         origin: origin.into(),
+        mode: None,
     };
     Ok((info, bytes))
 }
@@ -214,6 +268,7 @@ fn read_single_image(path: &Path) -> Result<(PetInfo, Vec<u8>), String> {
         mime: mime_for(&ext).into(),
         sprite_version: None,
         origin: "upload".into(),
+        mode: Some("cutout".into()),
     };
     Ok((info, bytes))
 }
@@ -334,6 +389,15 @@ mod tests {
         assert_eq!(info.mime, "image/png");
         assert!(!image.is_empty());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn built_in_pets_are_valid_images() {
+        assert!(looks_like_image(DEFAULT_SHEET));
+        assert!(looks_like_image(NAIDAN_IMAGE));
+        assert_eq!(picture_mode(None).unwrap(), "cutout");
+        assert_eq!(picture_mode(Some("original")).unwrap(), "original");
+        assert!(picture_mode(Some("sparkles")).is_err());
     }
 
     #[test]

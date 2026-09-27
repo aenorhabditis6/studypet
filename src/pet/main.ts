@@ -6,7 +6,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { DAY, HOUR, openDeadlines, outlook, remindableEvents, type Level, type Outlook } from "../shared/agenda";
 import { errorText, inTauri, invoke, listen, log } from "../shared/bridge";
-import { isGradescopeUrl } from "../shared/gradescope";
+import { DEFAULT_GRADESCOPE_SITE, gradescopeSiteOf, isGradescopeUrl } from "../shared/gradescope";
+import { openService as openServiceWindow } from "../shared/services";
 import * as lines from "../shared/lines";
 import { getDone, getItems, getSettings, getSources, keys, store, type DoneMap } from "../shared/store";
 import { connectGradescope, getNotices, syncAll } from "../shared/sync";
@@ -121,7 +122,7 @@ async function main() {
   try {
     const bytes = await invoke<ArrayBuffer>("get_pet_image");
     const url = URL.createObjectURL(new Blob([bytes], { type: info.mime }));
-    view = await createPetView(info.kind, url, Math.min(150, Math.max(80, settings.petSize)));
+    view = await createPetView(info.kind, url, Math.min(150, Math.max(80, settings.petSize)), info.mode);
   } catch (e) {
     // Don't sit invisible: send the user to pick another pet.
     log("pet: couldn't load the pet image:", errorText(e));
@@ -130,7 +131,7 @@ async function main() {
   }
   petBox.append(view.el);
   layout();
-  log(`pet: ${info.name} (${info.kind}) ${view.width}×${view.height}`);
+  log(`pet: ${info.name} (${info.kind}) ${view.width}×${view.height}${view.features.length ? ` · ${view.features.join(" · ")}` : ""}`);
 
   await refresh();
   wireInput();
@@ -276,14 +277,19 @@ function actionFor(item: Item): Action | undefined {
 }
 
 function openService(name: "gradescope" | "ed", url?: string) {
-  return invoke("open_service", { name, url }).catch((e) => log("open_service failed:", errorText(e)));
+  return openServiceWindow(name, url).catch((e) => log("open_service failed:", errorText(e)));
 }
 
 // ---------------------------------------------------------------------------
 // State → posture, badge, dot
 
+let lastLevel: Level | null = null;
+
 function applyMood() {
   current = outlook(items, done);
+  // A deadline just slipped by: a moment of dismay (not on launch, not while focusing).
+  if (current.level === "overdue" && lastLevel !== null && lastLevel !== "overdue" && !sessions.focusing) play("failed");
+  lastLevel = current.level;
   view.setBase(sessions.focusing ? "review" : MOOD[current.level]);
   const count = current.within24h.length;
   badge.dataset.level = current.level;
@@ -399,9 +405,11 @@ function onServicePage(service: string, url: string) {
     }
     if (service === "gradescope") {
       if (/login|saml|sso|auth/i.test(path)) return;
-      const connected = (await getSources()).some((s) => s.kind === "gradescope");
-      if (!connected) {
-        const count = await connectGradescope().catch((e) => (log("gradescope connect:", errorText(e)), null));
+      // Connect on first login — and follow the user to another regional site if they log in there.
+      const site = gradescopeSiteOf(url);
+      const connected = (await getSources()).find((s) => s.kind === "gradescope");
+      if (site && (!connected || (connected.site ?? DEFAULT_GRADESCOPE_SITE) !== site)) {
+        const count = await connectGradescope(site).catch((e) => (log("gradescope connect:", errorText(e)), null));
         if (count !== null) {
           play("jumping", 2);
           speak(lines.gradescopeConnected(count));
@@ -607,22 +615,15 @@ async function wireEvents() {
     }
   });
 
-  // Eyes follow the cursor when it's around (positions come from the Rust hit-test loop).
+  // The pet watches the cursor wherever it goes (positions come from the Rust hit-test loop),
+  // and looks back at you once the mouse has rested for a few seconds.
   let lookTimer = 0;
   await listen<[number, number]>("pet-cursor", ([x, y]) => {
     if (motion.tucked) return;
-    const dx = x - (body.x + body.w / 2);
-    const dy = y - (body.y + body.h / 2);
-    const dist = Math.hypot(dx, dy);
-    if (dist < body.w * 0.45 || dist > 420) {
-      view.look(null);
-      return;
-    }
-    view.look((Math.atan2(dx, -dy) * 180) / Math.PI);
+    view.look({ x: x - (body.x + body.w / 2), y: y - (body.y + body.h * 0.4) });
     window.clearTimeout(lookTimer);
-    lookTimer = window.setTimeout(() => view.look(null), 3_500);
+    lookTimer = window.setTimeout(() => view.look(null), 6_000);
   });
-  await listen("pet-cursor-away", () => view.look(null));
 }
 
 // ---------------------------------------------------------------------------

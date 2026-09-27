@@ -1,9 +1,9 @@
 import { emit, errorText, invoke } from "./bridge";
 import { ED_SOURCE, fetchEd, type EdUserResponse } from "./ed";
-import { fetchGradescope, GRADESCOPE_SOURCE } from "./gradescope";
+import { DEFAULT_GRADESCOPE_SITE, fetchGradescope, GRADESCOPE_SOURCE } from "./gradescope";
 import { countKinds, dedupe, parseIcs } from "./ics";
 import { getItems, getSources, keys, store } from "./store";
-import type { Counts, EdCourse, Item, Notice, Source, SourceKind } from "./types";
+import type { Counts, EdCourse, EdRegion, Item, Notice, Source, SourceKind } from "./types";
 
 let running: Promise<SyncResult> | null = null;
 
@@ -33,12 +33,12 @@ async function doSync(): Promise<SyncResult> {
   for (const s of sources) {
     try {
       if (s.kind === "gradescope") {
-        const items = await fetchGradescope();
+        const items = await fetchGradescope(s.site ?? DEFAULT_GRADESCOPE_SITE);
         if (items === "logged-out") throw new Error(GRADESCOPE_LOGGED_OUT);
         next.push(...items);
         s.counts = countKinds(items);
       } else if (s.kind === "ed") {
-        const { notices, courses } = await fetchEd();
+        const { notices, courses } = await fetchEd(s.region ?? "us");
         await kv.set(keys.notices, notices);
         await kv.set(keys.edCourses, courses);
         s.counts = { deadlines: 0, events: 0, notices: notices.length };
@@ -87,19 +87,22 @@ export async function addSource(kind: SourceKind, url: string): Promise<{ source
 }
 
 /**
- * Called whenever the user may have just logged in to Gradescope. Returns the number of
- * assignments found, or null if the built-in window isn't logged in yet.
+ * Called whenever the user may have just logged in to Gradescope (on `site`, or the site
+ * already connected). Returns the number of assignments found, or null if the built-in
+ * window isn't logged in yet.
  */
-export async function connectGradescope(): Promise<number | null> {
-  const items = await fetchGradescope();
+export async function connectGradescope(site?: string): Promise<number | null> {
+  const existing = (await getSources()).find((s) => s.id === GRADESCOPE_SOURCE);
+  site ??= existing?.site ?? DEFAULT_GRADESCOPE_SITE;
+  const items = await fetchGradescope(site);
   if (items === "logged-out") return null;
   const counts = countKinds(items);
-  const existing = (await getSources()).find((s) => s.id === GRADESCOPE_SOURCE);
   await upsertSource(
     {
       id: GRADESCOPE_SOURCE,
       name: "Gradescope",
       kind: "gradescope",
+      site,
       addedAt: existing?.addedAt ?? Date.now(),
       lastSync: Date.now(),
       lastError: null,
@@ -110,10 +113,14 @@ export async function connectGradescope(): Promise<number | null> {
   return counts.deadlines;
 }
 
-/** Tests an Ed API token, stores it in the keychain, and loads announcements. Throws a readable message. */
-export async function connectEd(token: string): Promise<{ name: string; courses: number; notices: number }> {
-  const user = JSON.parse(await invoke<string>("ed_connect", { token })) as EdUserResponse;
-  const { notices, courses } = await fetchEd();
+/**
+ * Tests an Ed API token (in `region`, or whichever region it belongs to), stores it in the
+ * keychain, and loads announcements. Throws a readable message.
+ */
+export async function connectEd(token: string, region: EdRegion): Promise<{ name: string; courses: number; notices: number }> {
+  const connected = await invoke<{ region: EdRegion; user: string }>("ed_connect", { token, region });
+  const user = JSON.parse(connected.user) as EdUserResponse;
+  const { notices, courses } = await fetchEd(connected.region);
   const kv = await store();
   await kv.set(keys.notices, notices);
   await kv.set(keys.edCourses, courses);
@@ -122,6 +129,7 @@ export async function connectEd(token: string): Promise<{ name: string; courses:
       id: ED_SOURCE,
       name: `Ed · ${user.user.name}`,
       kind: "ed",
+      region: connected.region,
       addedAt: Date.now(),
       lastSync: Date.now(),
       lastError: null,

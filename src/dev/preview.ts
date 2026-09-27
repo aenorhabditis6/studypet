@@ -43,7 +43,9 @@ export function mountPreview(api: PreviewApi) {
   ]);
   row(
     "look",
-    [0, 45, 90, 135, 180, 225, 270, 315].map((a) => [`${a}°`, () => api.view.look(a)] as [string, () => void]).concat([["off", () => api.view.look(null)]]),
+    [0, 45, 90, 135, 180, 225, 270, 315]
+      .map((a) => [`${a}°`, () => api.view.look({ x: Math.sin((a * Math.PI) / 180) * 200, y: -Math.cos((a * Math.PI) / 180) * 200 })] as [string, () => void])
+      .concat([["off", () => api.view.look(null)]]),
   );
   row("say", [["long text", () => api.speak("Reading Response 4（ENGL 150）明天 20:00 截止～今天先做一小部分？我陪你一起，做完奖励自己一杯奶茶")]]);
   row("bubble", [

@@ -6,8 +6,29 @@ import { invoke, log } from "./bridge";
 import { shortCourse } from "./ics";
 import type { Item } from "./types";
 
-export const GRADESCOPE = "https://www.gradescope.com";
 export const GRADESCOPE_SOURCE = "gradescope";
+
+/** Gradescope runs a separate site per region; a school uses one of them. */
+export const GRADESCOPE_SITES: { host: string; label: string }[] = [
+  { host: "www.gradescope.com", label: "gradescope.com（美国和大多数学校）" },
+  { host: "www.gradescope.ca", label: "gradescope.ca（加拿大）" },
+  { host: "www.gradescope.eu", label: "gradescope.eu（欧洲）" },
+  { host: "www.gradescope.com.au", label: "gradescope.com.au（澳洲）" },
+];
+export const DEFAULT_GRADESCOPE_SITE = "www.gradescope.com";
+
+export const gradescopeHome = (site = DEFAULT_GRADESCOPE_SITE) => `https://${site}/`;
+
+/** The Gradescope site a link is on, if it's on one. */
+export function gradescopeSiteOf(url?: string): string | null {
+  try {
+    const u = new URL(url ?? "");
+    const host = u.hostname.startsWith("www.") ? u.hostname : `www.${u.hostname}`;
+    return u.protocol === "https:" && GRADESCOPE_SITES.some((s) => s.host === host) ? host : null;
+  } catch {
+    return null;
+  }
+}
 
 const DAY = 86_400_000;
 
@@ -63,7 +84,7 @@ export function parseDashboard(html: string): GsCourse[] | null {
 }
 
 /** Assignments on a student course page. Null when it isn't one (e.g. logged out). */
-export function parseCourse(html: string, course: GsCourse): Item[] | null {
+export function parseCourse(html: string, course: GsCourse, site = DEFAULT_GRADESCOPE_SITE): Item[] | null {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const table = doc.querySelector("#assignments-student-table");
   let rows = [...doc.querySelectorAll("#assignments-student-table tbody tr")];
@@ -98,7 +119,7 @@ export function parseCourse(html: string, course: GsCourse): Item[] | null {
       start: due,
       allDay: false,
       // A submitted row links to the submission; otherwise the course page, whose row button opens the upload dialog.
-      url: href.startsWith("/") ? `${GRADESCOPE}${href}` : `${GRADESCOPE}/courses/${course.id}`,
+      url: href.startsWith("/") ? `https://${site}${href}` : `https://${site}/courses/${course.id}`,
       submitted: status !== "" && !/no submission/i.test(status),
       lateDue: parseGsDate(dues[1]?.getAttribute("datetime")),
     });
@@ -121,8 +142,8 @@ export function parseGsDate(value?: string | null): number | undefined {
 }
 
 /** Everything due in the current term's courses, or "logged-out" if the session is gone. */
-export async function fetchGradescope(now = Date.now()): Promise<Item[] | "logged-out"> {
-  const home = await invoke<Page>("gradescope_fetch", { path: "/" });
+export async function fetchGradescope(site: string, now = Date.now()): Promise<Item[] | "logged-out"> {
+  const home = await invoke<Page>("gradescope_fetch", { site, path: "/" });
   const courses = parseDashboard(home.html);
   if (!courses) {
     log("gradescope: dashboard not available (logged out?)", home.status);
@@ -130,8 +151,8 @@ export async function fetchGradescope(now = Date.now()): Promise<Item[] | "logge
   }
   const items: Item[] = [];
   for (const course of courses.slice(0, 12)) {
-    const page = await invoke<Page>("gradescope_fetch", { path: `/courses/${course.id}` });
-    const parsed = parseCourse(page.html, course);
+    const page = await invoke<Page>("gradescope_fetch", { site, path: `/courses/${course.id}` });
+    const parsed = parseCourse(page.html, course, site);
     log(`gradescope: course ${course.id} → ${parsed === null ? "not a student course page" : `${parsed.length} assignments`}`);
     if (parsed) items.push(...parsed);
   }
@@ -141,5 +162,5 @@ export async function fetchGradescope(now = Date.now()): Promise<Item[] | "logge
 }
 
 export function isGradescopeUrl(url?: string): boolean {
-  return !!url && url.startsWith(`${GRADESCOPE}/`);
+  return gradescopeSiteOf(url) !== null;
 }

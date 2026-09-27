@@ -24,6 +24,10 @@ const PICTURE: PetInfo = {
   origin: "upload",
 };
 
+const NAIDAN: PetInfo = { kind: "image", name: "奶蛋", imageFile: "image.jpg", mime: "image/jpeg", origin: "default", mode: "cutout" };
+const NAIDAN_FILE = "/src-tauri/resources/pets/naidan/naidan.jpg";
+const chosen = () => sessionStorage.getItem("pet");
+
 const CLOUDBUN: PetInfo = {
   kind: "codex-atlas",
   name: "Cloudbun",
@@ -44,18 +48,23 @@ export async function mockEmit(event: string, payload?: unknown) {
   listeners.get(event)?.forEach((h) => h(payload));
 }
 
+// The pet watches the mouse over the preview page, as it watches the cursor on the desktop.
+window.addEventListener("mousemove", (e) => void mockEmit("pet-cursor", [e.clientX, e.clientY]));
+
 export async function mockInvoke<T>(cmd: string, _args?: Record<string, unknown>): Promise<T> {
   const r = (v: unknown) => v as T;
   switch (cmd) {
     case "get_pet":
-      return r(fresh && !sessionStorage.getItem("pet") ? null : singleImage ? PICTURE : CLOUDBUN);
+      if (chosen() === "naidan") return r(NAIDAN);
+      return r(fresh && !chosen() ? null : singleImage ? PICTURE : CLOUDBUN);
     case "get_pet_image": {
-      const file = singleImage ? imagePath : "/src-tauri/resources/pets/cloudbun/spritesheet.webp";
+      const file = chosen() === "naidan" ? NAIDAN_FILE : singleImage ? imagePath : "/src-tauri/resources/pets/cloudbun/spritesheet.webp";
       return r(await (await fetch(file)).arrayBuffer());
     }
     case "use_default_pet":
-      sessionStorage.setItem("pet", "1");
-      return r(CLOUDBUN);
+      sessionStorage.setItem("pet", String(_args?.id ?? "cloudbun"));
+      void mockEmit("pet-changed");
+      return r(_args?.id === "naidan" ? NAIDAN : CLOUDBUN);
     case "import_pet":
       throw new Error("预览模式读不了本地文件，请在 App 里试");
     case "list_codex_pets":
@@ -69,9 +78,10 @@ export async function mockInvoke<T>(cmd: string, _args?: Record<string, unknown>
     case "gradescope_fetch": {
       const path = String(_args?.path ?? "/");
       const course = path.match(/^\/courses\/(\d+)/)?.[1];
-      return r({ url: `https://www.gradescope.com${path}`, status: 200, html: course ? sampleGradescopeCourse(course) : sampleGradescopeDashboard() });
+      return r({ url: `https://${String(_args?.site)}${path}`, status: 200, html: course ? sampleGradescopeCourse(course) : sampleGradescopeDashboard() });
     }
     case "ed_connect":
+      return r({ region: _args?.region ?? "us", user: sampleEdUser() });
     case "ed_user":
       return r(sampleEdUser());
     case "ed_threads":

@@ -128,6 +128,9 @@ function textProp(ev: IcalEvent, name: string): string | undefined {
 export function shortCourse(course: string): string {
   const code = course.match(/(?:^|[^A-Za-z&])([A-Z][A-Z&]{1,7})[\s_-]?(\d{1,4}[A-Z]{0,2})(?![A-Za-z0-9])/);
   if (code) return `${code[1]} ${code[2]}`;
+  // All-number codes, like Carnegie Mellon's "15-213".
+  const numeric = course.match(/(?:^|\s)(\d{2}-\d{3})(?![\d-])/);
+  if (numeric) return numeric[1];
   const head = course.split(/\s[-–|:]\s/)[0].trim();
   return head.length > 16 ? `${head.slice(0, 15)}…` : head;
 }

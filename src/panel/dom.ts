@@ -34,7 +34,7 @@ export function button(label: string, onclick: () => unknown, cls = "btn"): HTML
 export async function petPreview(info: PetInfo, height: number): Promise<PetView> {
   const bytes = await invoke<ArrayBuffer>("get_pet_image");
   const url = URL.createObjectURL(new Blob([bytes], { type: info.mime }));
-  return createPetView(info.kind, url, height);
+  return createPetView(info.kind, url, height, info.mode);
 }
 
 export function openLink(url: string) {

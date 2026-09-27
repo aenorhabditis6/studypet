@@ -1,15 +1,17 @@
-import { open } from "@tauri-apps/plugin-dialog";
 import { emit, errorText, invoke } from "../shared/bridge";
 import { ago } from "../shared/format";
 import { getSettings, getSources, keys, store } from "../shared/store";
-import { ED_TOKEN_PAGE } from "../shared/ed";
+import { ED_REGIONS, edTokenPage } from "../shared/ed";
+import { DEFAULT_GRADESCOPE_SITE, GRADESCOPE_SITES, gradescopeHome } from "../shared/gradescope";
 import * as lines from "../shared/lines";
+import { openService } from "../shared/services";
 import { connectEd, connectGradescope, removeSource } from "../shared/sync";
-import { WECHAT, type PetInfo, type Settings, type Source } from "../shared/types";
+import { WECHAT, type EdRegion, type PetInfo, type Settings, type Source } from "../shared/types";
 import type { PetView } from "../pet/sprite";
 import { button, confirmAction, h, petPreview } from "./dom";
 import type { Nav } from "./main";
 import { describePet, linkForm } from "./onboarding";
+import { builtInChoices, uploadChoices, uploadPet, useBuiltIn } from "./pet-picker";
 
 export async function renderSettings(root: HTMLElement, nav: Nav): Promise<() => void> {
   const [pet, settings] = await Promise.all([invoke<PetInfo | null>("get_pet"), getSettings()]);
@@ -21,15 +23,11 @@ export async function renderSettings(root: HTMLElement, nav: Nav): Promise<() =>
   // Pet
   let preview: PetView | null = null;
   const petError = h("p", { class: "error", role: "alert" });
-  const replace = async (directory: boolean) => {
-    const path = await open(
-      directory
-        ? { directory: true, multiple: false, title: "选择 Codex 宠物文件夹" }
-        : { multiple: false, title: "选择宠物图片或 pet.json", filters: [{ name: "宠物", extensions: ["png", "webp", "gif", "jpg", "jpeg", "json"] }] },
-    );
-    if (typeof path !== "string") return;
+  // Every change emits pet-changed, which re-renders this view.
+  const attempt = async (task: () => Promise<unknown>) => {
+    petError.textContent = "";
     try {
-      await invoke("import_pet", { path }); // emits pet-changed → this view re-renders
+      await task();
     } catch (e) {
       petError.textContent = errorText(e);
     }
@@ -54,14 +52,25 @@ export async function renderSettings(root: HTMLElement, nav: Nav): Promise<() =>
         "div",
         { class: "pet-row" },
         h("div", { class: "pet-stage small" }, preview?.el),
-        h("div", null, h("div", { class: "pet-name" }, pet?.name ?? "还没有宠物"), pet ? h("div", { class: "pet-kind" }, describePet(pet)) : null),
+        h(
+          "div",
+          null,
+          h("div", { class: "pet-name" }, pet?.name ?? "还没有宠物"),
+          pet ? h("div", { class: "pet-kind" }, describePet(pet)) : null,
+          preview?.features.length ? h("div", { class: "pet-kind" }, preview.features.join(" · ")) : null,
+        ),
       ),
+      pet?.kind === "image"
+        ? checkbox("自动抠图，让眼睛跟着鼠标转（关掉就用原图）", pet.mode !== "original", (on) =>
+            void attempt(() => invoke("set_pet_mode", { mode: on ? "cutout" : "original" })),
+          )
+        : null,
       h(
-        "div",
-        { class: "row wrap" },
-        button("换一只（图片 / pet.json）…", () => replace(false), "btn small"),
-        button("选宠物文件夹…", () => replace(true), "btn small"),
-        pet?.origin !== "default" ? button("换回 Cloudbun", () => invoke("use_default_pet"), "btn small") : null,
+        "details",
+        { class: "swap" },
+        h("summary", null, "换一只"),
+        builtInChoices((id) => attempt(() => useBuiltIn(id))),
+        uploadChoices((c) => attempt(() => uploadPet(c))),
       ),
       petError,
       pet ? nameField(pet.name, petError) : null,
@@ -209,11 +218,14 @@ function statusLine(s: Source | undefined, detail: string): HTMLElement {
 async function gradescopeSection(): Promise<HTMLElement> {
   const source = (await getSources()).find((s) => s.kind === "gradescope");
   const status = h("p", { class: "status", role: "status" });
+  // Which of Gradescope's regional sites the school uses. (Logging in on another one in the
+  // built-in window switches to that one.)
+  const site = choose("Gradescope 网站", GRADESCOPE_SITES.map((s) => [s.host, s.label]), DEFAULT_GRADESCOPE_SITE);
   const check = async () => {
     status.className = "status";
     status.textContent = "正在读取 Gradescope…";
     try {
-      const count = await connectGradescope();
+      const count = await connectGradescope(source ? undefined : site.value);
       status.className = count === null ? "status bad" : "status good";
       status.textContent = count === null ? "还没登录成功。在 Gradescope 窗口里登录完再点一次～" : lines.gradescopeConnected(count);
     } catch (e) {
@@ -226,12 +238,15 @@ async function gradescopeSection(): Promise<HTMLElement> {
     { class: "block" },
     h("h2", null, "Gradescope"),
     source
-      ? statusLine(source, `${source.counts?.deadlines ?? 0} 个作业`)
-      : h("p", { class: "hint" }, "在内置窗口里用学校账号登录一次（Stanford 选 School Credentials），我就能看到作业和交没交，还能一键去交。登录好后我会自动连上。"),
+      ? statusLine(source, `${siteName(source.site)}${source.counts?.deadlines ?? 0} 个作业`)
+      : [
+          h("p", { class: "hint" }, "在内置窗口里用学校账号登录一次（学校统一登录就选 School Credentials），我就能看到作业和交没交，还能一键去交。登录好后我会自动连上。"),
+          h("label", { class: "field" }, h("span", null, "学校用的"), site),
+        ],
     h(
       "div",
       { class: "row wrap" },
-      button(source ? "打开 Gradescope" : "打开 Gradescope 登录", () => invoke("open_service", { name: "gradescope" }), "btn small primary"),
+      button(source ? "打开 Gradescope" : "打开 Gradescope 登录", () => openService("gradescope", source ? undefined : gradescopeHome(site.value)), "btn small primary"),
       button(source ? "现在同步" : "我登录好了", check, "btn small"),
       source
         ? button("断开", async () => {
@@ -245,7 +260,12 @@ async function gradescopeSection(): Promise<HTMLElement> {
   );
 }
 
-/** Ed: a personal API token from edstem.org/us/settings/api-tokens. */
+/** "gradescope.ca · " for the regional sites; nothing for the main one. */
+function siteName(site?: string): string {
+  return site && site !== DEFAULT_GRADESCOPE_SITE ? `${site.replace(/^www\./, "")} · ` : "";
+}
+
+/** Ed: a personal API token from edstem.org/<region>/settings/api-tokens. */
 async function edSection(): Promise<HTMLElement> {
   const source = (await getSources()).find((s) => s.kind === "ed");
   const status = h("p", { class: "status", role: "status" });
@@ -258,13 +278,14 @@ async function edSection(): Promise<HTMLElement> {
       h(
         "div",
         { class: "row wrap" },
-        button("打开 Ed", () => invoke("open_service", { name: "ed" }), "btn small primary"),
+        button("打开 Ed", () => openService("ed"), "btn small primary"),
         button("断开", async () => {
           if (await confirmAction("断开 Ed？token 会从钥匙串删除。")) await removeSource(source.id);
         }, "btn small"),
       ),
     );
   }
+  const region = choose("Ed 地区", ED_REGIONS.map((r) => [r.id, r.label]), "us");
   const input = h("input", { type: "password", placeholder: "粘贴 Ed API token", spellcheck: false, autocomplete: "off" });
   const connect = h("button", { class: "btn primary", type: "button" }, "连接");
   const submit = async () => {
@@ -273,7 +294,7 @@ async function edSection(): Promise<HTMLElement> {
     status.className = "status";
     status.textContent = "正在连接 Ed…";
     try {
-      const r = await connectEd(input.value);
+      const r = await connectEd(input.value, region.value as EdRegion);
       input.value = "";
       status.className = "status good";
       status.textContent = `✓ 连上了！${r.name}，${r.courses} 门课，${r.notices} 条近期公告`;
@@ -296,7 +317,8 @@ async function edSection(): Promise<HTMLElement> {
     h(
       "ol",
       { class: "guide" },
-      h("li", null, "打开 Ed 的 API Tokens 页面（先用 Stanford 账号登录）：", button("打开", () => invoke("open_service", { name: "ed", url: ED_TOKEN_PAGE }), "btn small link")),
+      h("li", null, "看看你平时用的 Ed 网址是哪个：", region),
+      h("li", null, "打开 Ed 的 API Tokens 页面（先用学校账号登录）：", button("打开", () => openService("ed", edTokenPage(region.value as EdRegion)), "btn small link")),
       h("li", null, "点 ", h("b", null, "Create Token"), "，复制生成的 token"),
       h("li", null, "粘贴到下面"),
     ),
@@ -304,6 +326,11 @@ async function edSection(): Promise<HTMLElement> {
     status,
     h("p", { class: "privacy" }, "🔒 token 只存在这台电脑的钥匙串里，只用来读公告和未读数。"),
   );
+}
+
+/** A dropdown of [value, text] options. */
+function choose(label: string, options: [string, string][], current: string): HTMLSelectElement {
+  return h("select", { "aria-label": label }, options.map(([value, text]) => h("option", { value, selected: value === current }, text)));
 }
 
 function select(label: string, values: number[], current: number, text: (v: number) => string, onChange: (v: number) => void) {

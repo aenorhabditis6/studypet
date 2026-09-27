@@ -7,7 +7,11 @@ export interface PetInfo {
   mime: string;
   spriteVersion?: number | null;
   origin: "default" | "codex" | "upload";
+  /** Pictures only: "cutout" (background removed, animated eyes) or "original" (as is). */
+  mode?: PictureMode;
 }
+
+export type PictureMode = "cutout" | "original";
 
 /** A pet installed for the Codex app, offered during onboarding. */
 export interface CodexPetRef {
@@ -20,6 +24,9 @@ export interface CodexPetRef {
 export type SourceKind = "canvas" | "calendar" | "gradescope" | "ed";
 
 /** A connected source. Secrets (feed URL, Ed token) live in the OS keychain, never here. */
+/** Ed runs a server per region; a school's Ed address shows which (edstem.org/us/…). */
+export type EdRegion = "us" | "eu" | "au";
+
 export interface Source {
   id: string;
   name: string;
@@ -28,6 +35,10 @@ export interface Source {
   lastSync?: number;
   lastError?: string | null;
   counts?: Counts;
+  /** Gradescope: the school's Gradescope site ("www.gradescope.ca"). */
+  site?: string;
+  /** Ed: the school's Ed region. */
+  region?: EdRegion;
 }
 
 export interface Counts {
@@ -78,7 +89,7 @@ export interface EdCourse {
 }
 
 export interface Settings {
-  /** Minutes before a class to remind (Stanford's campus is big: default an hour). */
+  /** Minutes before a class to remind (campuses can be big: default an hour). */
   classLeadMin: number;
   /** Pet height on the desktop, in CSS px. */
   petSize: number;

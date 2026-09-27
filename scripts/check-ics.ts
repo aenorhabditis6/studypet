@@ -65,6 +65,10 @@ assert.equal(shortCourse("CS61A: Structure and Interpretation"), "CS 61A");
 assert.equal(shortCourse("F26-MS&E-245A-01"), "MS&E 245A");
 assert.equal(shortCourse("F26-MS&E-319-01"), "MS&E 319");
 assert.equal(shortCourse("F26-CS-229-01"), "CS 229");
+// Other schools' formats.
+assert.equal(shortCourse("COMP1234 Algorithms"), "COMP 1234");
+assert.equal(shortCourse("MATH-2210-001 Calculus III"), "MATH 2210");
+assert.equal(shortCourse("15-213 Intro to Computer Systems"), "15-213");
 
 // Time left always rounds down ("后天 23:59" must not read "还有 3 天" with 2.9 days left).
 assert.equal(relative(now + 2.9 * D, now), "还有 2 天");

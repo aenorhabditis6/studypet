@@ -8,6 +8,8 @@
 // - A single picture: animated with CSS (breathing, hopping, tilting).
 import "./sprite.css";
 import { cutout } from "./cutout";
+import { FaceRig } from "./face";
+import type { PictureMode } from "../shared/types";
 
 export type Anim =
   | "idle"
@@ -32,17 +34,27 @@ const ROWS: Anim[] = [
   "review",
 ];
 
-const FRAME_MS: Record<Anim, number> = {
-  idle: 140,
-  "running-right": 85,
-  "running-left": 85,
-  waving: 130,
-  jumping: 95,
-  failed: 130,
-  waiting: 150,
-  running: 100,
-  review: 160,
+/**
+ * Frame durations from the Codex pet contract (hatch-pet references/animation-rows.md):
+ * every frame gets `each` ms except the last, which gets `last`; idle has its own list.
+ */
+const TIMING: Record<Anim, { each: number; last: number; list?: number[] }> = {
+  idle: { each: 140, last: 320, list: [280, 110, 110, 140, 140, 320] },
+  "running-right": { each: 120, last: 220 },
+  "running-left": { each: 120, last: 220 },
+  waving: { each: 140, last: 280 },
+  jumping: { each: 140, last: 280 },
+  failed: { each: 140, last: 240 },
+  waiting: { each: 150, last: 260 },
+  running: { each: 120, last: 220 },
+  review: { each: 150, last: 280 },
 };
+
+function frameMs(anim: Anim, index: number, count: number): number {
+  const t = TIMING[anim];
+  if (t.list && count === t.list.length) return t.list[index];
+  return index === count - 1 ? t.last : t.each;
+}
 
 export interface Box {
   x: number;
@@ -50,6 +62,14 @@ export interface Box {
   w: number;
   h: number;
 }
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+/** How close (CSS px) the cursor must be for the pet to turn or lean toward it. */
+const NEAR = 420;
 
 export interface PetView {
   readonly el: HTMLElement;
@@ -63,10 +83,12 @@ export interface PetView {
   play(anim: Anim, loops?: number): Promise<void>;
   /** While being dragged. */
   setMoving(dir: "left" | "right" | null): void;
-  /** Look toward a direction (degrees clockwise from up), or stop looking. */
-  look(angle: number | null): void;
+  /** Look at the cursor (where it is from the pet's eyes, in CSS px), or back ahead. */
+  look(to: Point | null): void;
   /** Hold still on the resting pose (tucked away in meeting mode), or resume. */
   freeze(on: boolean): void;
+  /** What was set up automatically, for Settings ("背景已去掉", "眼睛会跟着鼠标"). */
+  readonly features: string[];
   destroy(): void;
 }
 
@@ -74,13 +96,19 @@ export async function createPetView(
   kind: "codex-atlas" | "image",
   imageUrl: string,
   height: number,
+  mode: PictureMode = "cutout",
 ): Promise<PetView> {
   const img = await loadImage(imageUrl);
   if (kind === "codex-atlas") {
     const atlas = readAtlas(img);
-    if (atlas) return new AtlasView(img, atlas, height);
+    if (!atlas) {
+      throw new Error(
+        `精灵图的尺寸对不上（${img.naturalWidth}×${img.naturalHeight}）。Codex 宠物需要 8 列、每格 192×208，整张 1536×1872 或 1536×2288`,
+      );
+    }
+    return new AtlasView(img, atlas, height);
   }
-  return new ImageView(img, height);
+  return new ImageView(img, height, mode);
 }
 
 function loadImage(url: string): Promise<HTMLImageElement> {
@@ -163,6 +191,7 @@ interface Step {
 const rand = (min: number, max: number) => min + Math.random() * (max - min);
 
 class AtlasView implements PetView {
+  readonly features: string[] = [];
   readonly el: HTMLCanvasElement;
   readonly width: number;
   readonly height: number;
@@ -238,9 +267,12 @@ class AtlasView implements PetView {
     if (!this.once) this.run();
   }
 
-  look(angle: number | null) {
+  look(to: Point | null) {
     let cell: [number, number] | null = null;
-    if (angle !== null && this.hasLook) {
+    const d = to ? Math.hypot(to.x, to.y) : 0;
+    // Turns its head while the cursor is around — not when it's on the pet, or far away.
+    if (to && this.hasLook && d > this.body.w * 0.45 && d < NEAR) {
+      const angle = (Math.atan2(to.x, -to.y) * 180) / Math.PI;
       const k = Math.round((((angle % 360) + 360) % 360) / 22.5) % 16;
       cell = k < 8 ? [9, k] : [10, k - 8];
     }
@@ -296,9 +328,10 @@ class AtlasView implements PetView {
   }
 
   private cycle(): Step[] {
-    const seq = (anim: Anim, ms = FRAME_MS[anim]) => {
+    const seq = (anim: Anim) => {
       const row = ROWS.indexOf(anim);
-      return (this.frames.get(anim) ?? []).map((col) => ({ row, col, ms }));
+      const cols = this.frames.get(anim) ?? [];
+      return cols.map((col, i) => ({ row, col, ms: frameMs(anim, i, cols.length) }));
     };
     if (this.once) return seq(this.once.anim);
     if (this.moving) {
@@ -328,7 +361,8 @@ class AtlasView implements PetView {
   }
 
   private fallbackIdle(): Step[] {
-    return [...(this.frames.get("idle") ?? []).map((col) => ({ row: 0, col, ms: FRAME_MS.idle })), { row: 0, col: this.idleRest, ms: 3000 }];
+    const cols = this.frames.get("idle") ?? [];
+    return [...cols.map((col, i) => ({ row: 0, col, ms: frameMs("idle", i, cols.length) })), { row: 0, col: this.idleRest, ms: 3000 }];
   }
 
   private draw(row: number, col: number) {
@@ -366,20 +400,39 @@ class ImageView implements PetView {
   readonly body: Box;
   /** Leans toward the cursor; the animated picture sits inside it. */
   private lookLayer: HTMLDivElement;
+  /** Moving eyes, blinks and expressions, when the picture's eyes could be found. */
+  private rig: FaceRig | null;
   private onceTimer = 0;
   private idleTimer = 0;
+  private blinkTimer = 0;
+  private glanceTimer = 0;
+  /** Whether it's watching the cursor right now (rather than looking ahead). */
+  private following = false;
   private pending: (() => void) | null = null;
+  readonly features: string[] = [];
 
-  constructor(img: HTMLImageElement, height: number) {
-    // Plain backgrounds (photos, stickers on white) are removed and the picture cropped.
-    const { canvas, removed } = cutout(img);
-    const aspect = canvas.width / canvas.height || 1;
-    // Fit into height × (1.4 · height) so very wide pictures don't overflow the window.
-    const maxW = height * 1.4;
-    this.height = Math.round(aspect * height > maxW ? maxW / aspect : height);
-    this.width = Math.round(this.height * aspect);
+  constructor(img: HTMLImageElement, height: number, mode: PictureMode) {
+    let canvas: HTMLCanvasElement;
+    if (mode === "original") {
+      // As uploaded: no background removal, no face rig — just the motions.
+      canvas = asCanvas(img);
+      this.rig = null;
+      this.features.push("原图");
+    } else {
+      // Plain backgrounds (photos, stickers on white) are removed and the picture cropped.
+      const { canvas: cut, removed } = cutout(img);
+      this.rig = FaceRig.detect(cut, fit(cut, height).height / cut.height);
+      canvas = this.rig ? this.rig.canvas : cut;
+      if (removed) this.features.push("背景已自动去掉");
+      if (!this.rig) this.features.push("没找到眼睛，只能整体动");
+      else {
+        this.features.push("眼睛会跟着鼠标 👀");
+        if (this.rig.turnsHead) this.features.push("会转头看你");
+        if (this.rig.zoom > 1.05) this.features.push("眼睛放大了一点，眼神更清楚");
+      }
+    }
+    ({ width: this.width, height: this.height } = fit(canvas, height));
     this.body = { x: 0, y: 0, w: this.width, h: this.height };
-    this.info = removed ? "background removed" : "as uploaded";
 
     this.el = document.createElement("div");
     this.el.className = "pet-image";
@@ -392,10 +445,8 @@ class ImageView implements PetView {
     this.el.append(this.lookLayer);
     this.el.dataset.base = "idle";
     this.scheduleIdle();
+    this.scheduleBlink();
   }
-
-  /** "background removed" or "as uploaded". */
-  readonly info: string;
 
   setBase(anim: Anim) {
     this.el.dataset.base = anim;
@@ -410,10 +461,14 @@ class ImageView implements PetView {
     void this.el.offsetWidth;
     this.el.dataset.once = anim;
     this.el.style.setProperty("--loops", String(loops));
+    // Happy ^ ^ eyes only when celebrating; otherwise the eyes stay open.
+    const happy = anim === "jumping";
+    if (happy) this.rig?.setExpression("happy");
     return new Promise((done) => {
       this.pending = done;
       this.onceTimer = window.setTimeout(() => {
         delete this.el.dataset.once;
+        if (happy) this.rig?.setExpression("open");
         this.pending = null;
         done();
       }, (ONCE_MS[anim] ?? 800) * loops);
@@ -429,36 +484,92 @@ class ImageView implements PetView {
     if (on) {
       this.el.dataset.frozen = "";
       delete this.el.dataset.once;
+      this.look(null); // still, eyes open, looking ahead
     } else {
       delete this.el.dataset.frozen;
     }
   }
 
-  look(angle: number | null) {
-    if (angle === null) {
+  look(to: Point | null) {
+    clearTimeout(this.glanceTimer);
+    this.following = to !== null;
+    const d = to ? Math.hypot(to.x, to.y) : 0;
+    // The eyes follow the cursor anywhere on screen: all the way over once it's a pet's height
+    // away, less when it's on the pet itself.
+    if (to) this.rig?.look(to.x / Math.max(d, this.height), to.y / Math.max(d, this.height));
+    else this.rig?.look(0, 0);
+    // The body leans toward it while it's close (a little, when the eyes do the looking).
+    if (!to || d < this.width * 0.45 || d > NEAR || "frozen" in this.el.dataset) {
       this.lookLayer.style.translate = "";
       this.lookLayer.style.rotate = "";
       return;
     }
-    const rad = (angle * Math.PI) / 180;
-    this.lookLayer.style.translate = `${(Math.sin(rad) * 5).toFixed(1)}px ${(-Math.cos(rad) * 3).toFixed(1)}px`;
-    this.lookLayer.style.rotate = `${(Math.sin(rad) * 7).toFixed(1)}deg`;
+    const lean = this.rig ? 0.5 : 1;
+    const ux = to.x / d;
+    const uy = to.y / d;
+    this.lookLayer.style.translate = `${(ux * 5 * lean).toFixed(1)}px ${(uy * 3 * lean).toFixed(1)}px`;
+    this.lookLayer.style.rotate = `${(ux * 7 * lean).toFixed(1)}deg`;
   }
 
   destroy() {
     clearTimeout(this.onceTimer);
     clearTimeout(this.idleTimer);
+    clearTimeout(this.blinkTimer);
+    clearTimeout(this.glanceTimer);
     this.pending?.();
     this.el.remove();
   }
 
-  /** Every few seconds while idle: a hop, a wiggle, a lean or a squish. */
+  /** Looks off to one side for a moment, as if something caught its eye. */
+  private glance(rig: FaceRig) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    rig.look(side * rand(0.6, 1), rand(-0.4, 0.3));
+    this.glanceTimer = window.setTimeout(() => {
+      if (!this.following) rig.look(0, 0);
+    }, rand(900, 1800));
+  }
+
+  /** An occasional quick blink — the eyes stay open nearly all the time. */
+  private scheduleBlink() {
+    if (!this.rig) return;
+    const rig = this.rig;
+    this.blinkTimer = window.setTimeout(() => {
+      const awake = !("frozen" in this.el.dataset) && rig.currentExpression === "open";
+      if (awake) {
+        rig.setExpression("closed");
+        window.setTimeout(() => {
+          if (rig.currentExpression === "closed") rig.setExpression("open");
+        }, 100);
+      }
+      this.scheduleBlink();
+    }, rand(9000, 18000));
+  }
+
+  /** Every few seconds while idle: a hop, a wiggle, a lean or a squish — or a glance around. */
   private scheduleIdle() {
     this.idleTimer = window.setTimeout(() => {
       const d = this.el.dataset;
       const idle = !("once" in d) && !("moving" in d) && !("frozen" in d) && (d.base === "idle" || d.base === "waiting");
-      if (idle) void this.play(IDLE_ACTS[Math.floor(Math.random() * IDLE_ACTS.length)]);
+      if (idle && this.rig && !this.following && Math.random() < 0.4) this.glance(this.rig);
+      else if (idle) void this.play(IDLE_ACTS[Math.floor(Math.random() * IDLE_ACTS.length)]);
       this.scheduleIdle();
     }, rand(3500, 8000));
   }
+}
+
+/** A picture's size on screen: `height` tall, but no wider than 1.4 × that (for very wide pictures). */
+function fit(picture: { width: number; height: number }, height: number) {
+  const aspect = picture.width / picture.height || 1;
+  const h = Math.round(aspect * height > height * 1.4 ? (height * 1.4) / aspect : height);
+  return { width: Math.round(h * aspect), height: h };
+}
+
+/** A picture drawn onto a canvas as-is (for "original" mode), at most 480 px on its long side. */
+function asCanvas(img: HTMLImageElement): HTMLCanvasElement {
+  const k = Math.min(1, 480 / Math.max(img.naturalWidth, img.naturalHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(img.naturalWidth * k));
+  canvas.height = Math.max(1, Math.round(img.naturalHeight * k));
+  canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas;
 }

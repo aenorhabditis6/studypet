@@ -824,3 +824,68 @@ textarea {
 .field .hint {
   font-size: 12px;
 }
+
+/* Choosing a pet */
+.choices {
+  display: grid;
+  gap: 8px;
+  margin: 6px 0 4px;
+}
+.choices.two {
+  grid-template-columns: 1fr 1fr;
+}
+.choice {
+  display: flex;
+  align-items: center;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.choice:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+.choice-main {
+  flex: 1;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+  font: inherit;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+.choice-main b {
+  display: block;
+  font-size: 13px;
+}
+.choice-icon {
+  font-size: 20px;
+}
+.choice-detail {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+}
+.choice .how {
+  margin-right: 8px;
+  white-space: nowrap;
+}
+.drop.compact {
+  padding: 10px;
+  margin-top: 10px;
+  border-width: 1.5px;
+}
+.drop.compact span {
+  margin: 0;
+}
+.swap {
+  margin-top: 10px;
+}
+.swap summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--accent);
+}

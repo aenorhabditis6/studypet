@@ -6,7 +6,7 @@ import { sampleEdThreads, sampleEdUser, sampleGradescopeCourse, sampleGradescope
 
 // The parsers run in the webview; give Node the two browser globals they touch.
 Object.assign(globalThis, { window: globalThis, DOMParser });
-const { parseCourse, parseDashboard, parseGsDate } = await import("../src/shared/gradescope.ts");
+const { gradescopeSiteOf, isGradescopeUrl, parseCourse, parseDashboard, parseGsDate } = await import("../src/shared/gradescope.ts");
 const { activeCourses, toNotices } = await import("../src/shared/ed.ts");
 const { openDeadlines } = await import("../src/shared/agenda.ts");
 const { dedupe } = await import("../src/shared/ics.ts");
@@ -53,6 +53,15 @@ assert.equal(ps2.courseShort, "MS&E 245A");
 assert.equal(report.id, "gradescope:900001:Final Project Report", "no id yet → title");
 assert.equal(parseCourse("<html><body>Log in</body></html>", courses[0]), null);
 
+// Schools on Gradescope's regional sites get links to their own site.
+const [ca] = parseCourse(sampleGradescopeCourse("900001", now), courses[0], "www.gradescope.ca")!;
+assert.equal(ca.url, "https://www.gradescope.ca/courses/900001/assignments/51900001/submissions/777");
+assert.equal(gradescopeSiteOf("https://gradescope.com.au/courses/1"), "www.gradescope.com.au");
+assert.equal(gradescopeSiteOf("https://www.gradescope.eu/"), "www.gradescope.eu");
+assert.equal(gradescopeSiteOf("https://www.gradescope.com.evil.com/"), null);
+assert.equal(gradescopeSiteOf("http://www.gradescope.com/"), null);
+assert.equal(isGradescopeUrl("https://canvas.example.edu/x"), false);
+
 // Submitted work isn't "to do".
 assert.deepEqual(openDeadlines(items, {}).map((i) => i.title), ["Problem Set 2", "Final Project Report"]);
 
@@ -80,5 +89,7 @@ assert.deepEqual(notices.map((n) => [n.title, n.seen]), [
 ]);
 assert.equal(notices[0].url, "https://edstem.org/us/courses/71001/discussion/3001");
 assert.equal(notices[0].course, "MS&E 245A");
+const [au] = toNotices(JSON.parse(sampleEdThreads(71001, now)).threads, active[0], now, "au");
+assert.equal(au.url, "https://edstem.org/au/courses/71001/discussion/3001", "links go to the school's Ed region");
 
 console.log(`all service checks passed (${courses.length} courses, ${items.length} assignments, ${notices.length} notices)`);

@@ -1,12 +1,12 @@
 // First run: 1) the user brings their own pet, 2) connects Canvas, 3) meets the pet.
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { open } from "@tauri-apps/plugin-dialog";
 import { emit, errorText, inTauri, invoke } from "../shared/bridge";
 import { getSources, keys, store } from "../shared/store";
 import { addSource } from "../shared/sync";
 import type { CodexPetRef, PetInfo, Source, SourceKind } from "../shared/types";
 import type { PetView } from "../pet/sprite";
 import { button, h, petPreview } from "./dom";
+import { builtInChoices, uploadChoices, uploadPet, useBuiltIn } from "./pet-picker";
 import type { Nav } from "./main";
 
 const STEPS = ["选宠物", "连 Canvas", "完成"];
@@ -54,22 +54,15 @@ export async function renderOnboarding(root: HTMLElement, nav: Nav): Promise<() 
         error.textContent = errorText(e);
       }
     };
-    const pick = async (directory: boolean) => {
-      const path = await open(
-        directory
-          ? { directory: true, multiple: false, title: "选择 Codex 宠物文件夹" }
-          : {
-              multiple: false,
-              title: "选择宠物图片或 pet.json",
-              filters: [{ name: "宠物", extensions: ["png", "webp", "gif", "jpg", "jpeg", "json"] }],
-            },
-      );
-      if (typeof path === "string") await importFrom(path);
-    };
-    const useDefault = async () => {
-      await invoke("use_default_pet");
-      choosing = false;
-      await show(1);
+    const done = async (task: () => Promise<unknown>) => {
+      error.textContent = "";
+      try {
+        if ((await task()) === false) return; // cancelled the file dialog
+        choosing = false;
+        await show(1);
+      } catch (e) {
+        error.textContent = errorText(e);
+      }
     };
 
     const intro = [
@@ -96,6 +89,7 @@ export async function renderOnboarding(root: HTMLElement, nav: Nav): Promise<() 
           h("div", { class: "pet-stage" }, preview.el),
           h("div", { class: "pet-name" }, pet.name),
           h("div", { class: "pet-kind" }, describePet(pet)),
+          preview.features.length ? h("div", { class: "pet-kind" }, preview.features.join(" · ")) : null,
           h("button", { class: "btn link", type: "button", onclick: () => ((choosing = true), void show(1)) }, "换一只"),
         ),
         h("div", { class: "actions" }, button("下一步", () => show(2), "btn primary")),
@@ -104,16 +98,17 @@ export async function renderOnboarding(root: HTMLElement, nav: Nav): Promise<() 
 
     dropZone = h(
       "div",
-      { class: "drop" },
-      h("div", { class: "drop-icon", "aria-hidden": "true" }, "🐾"),
-      h("strong", null, "把你的宠物拖到这里"),
-      h("span", null, "Codex 宠物文件夹 / pet.json，或者一张图片（透明背景的 PNG 最好）"),
-      h("div", { class: "row" }, button("选择图片或 pet.json…", () => pick(false)), button("选择宠物文件夹…", () => pick(true))),
+      { class: "drop compact" },
+      h("span", null, "🐾 也可以直接把图片或 Codex 宠物文件夹拖到这里"),
     );
     return h(
       "section",
       null,
       ...intro,
+      h("h3", null, "用内置的"),
+      builtInChoices((id) => done(() => useBuiltIn(id))),
+      h("h3", null, "或者上传你自己的"),
+      uploadChoices((c) => done(() => uploadPet(c))),
       dropZone,
       error,
       codexPets.length
@@ -126,12 +121,7 @@ export async function renderOnboarding(root: HTMLElement, nav: Nav): Promise<() 
             ),
           )
         : null,
-      h(
-        "div",
-        { class: "actions" },
-        pet ? button("取消", () => ((choosing = false), void show(1)), "btn") : null,
-        button("先用默认的 Cloudbun", useDefault, "btn link"),
-      ),
+      pet ? h("div", { class: "actions" }, button("取消", () => ((choosing = false), void show(1)), "btn")) : null,
     );
   }
 

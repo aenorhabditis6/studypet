@@ -5,9 +5,11 @@ import { emit, errorText, invoke } from "../shared/bridge";
 import { ago, dayHeading, dayOffset, dueText, hm, meetingName, relative, splitLocation } from "../shared/format";
 import * as lines from "../shared/lines";
 import { getDone, getItems, getSources, keys, store } from "../shared/store";
+import { edCourseUrl } from "../shared/ed";
 import { isGradescopeUrl } from "../shared/gradescope";
+import { openService } from "../shared/services";
 import { getEdCourses, getNotices, syncAll } from "../shared/sync";
-import type { EdCourse, Item, Notice, PetInfo } from "../shared/types";
+import type { EdCourse, EdRegion, Item, Notice, PetInfo } from "../shared/types";
 import type { PetView } from "../pet/sprite";
 import { button, h, openLink, petPreview } from "./dom";
 import type { Nav } from "./main";
@@ -97,7 +99,8 @@ export async function renderToday(root: HTMLElement, nav: Nav): Promise<() => vo
     ),
   );
 
-  if (sources.some((s) => s.kind === "ed")) root.append(edBlock(notices, edCourses, now));
+  const ed = sources.find((s) => s.kind === "ed");
+  if (ed) root.append(edBlock(notices, edCourses, ed.region ?? "us", now));
 
   // Events, grouped by day
   const events = items.filter((i) => i.kind === "event" && (i.end ?? i.start) >= now && i.start <= now + 7 * DAY);
@@ -189,7 +192,7 @@ function taskRow(i: Item, now: number, isDone: boolean): HTMLElement {
   const url = i.url;
   if (url && isGradescopeUrl(url)) {
     row.append(
-      button(i.submitted ? "查看" : "去提交", () => invoke("open_service", { name: "gradescope", url }), `btn small ${i.submitted ? "" : "submit"}`),
+      button(i.submitted ? "查看" : "去提交", () => openService("gradescope", url), `btn small ${i.submitted ? "" : "submit"}`),
     );
   } else if (url) {
     row.append(
@@ -228,8 +231,8 @@ async function setDone(item: Item, isDone: boolean) {
 }
 
 /** Ed: unread counts per course and the latest announcements. */
-function edBlock(notices: Notice[], courses: EdCourse[], now: number): HTMLElement {
-  const open = (url?: string) => () => invoke("open_service", { name: "ed", url });
+function edBlock(notices: Notice[], courses: EdCourse[], region: EdRegion, now: number): HTMLElement {
+  const open = (url?: string) => () => openService("ed", url);
   return h(
     "section",
     { class: "block" },
@@ -241,7 +244,7 @@ function edBlock(notices: Notice[], courses: EdCourse[], now: number): HTMLEleme
           courses.map((c) =>
             h(
               "button",
-              { class: `ed-course${c.unseen ? " unread" : ""}`, type: "button", title: c.name, onclick: open(`https://edstem.org/us/courses/${c.id}/discussion`) },
+              { class: `ed-course${c.unseen ? " unread" : ""}`, type: "button", title: c.name, onclick: open(edCourseUrl(region, c.id)) },
               c.code,
               c.unseen ? h("span", { class: "count" }, c.unseen) : null,
             ),

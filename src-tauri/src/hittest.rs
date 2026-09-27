@@ -5,7 +5,7 @@
 //! window ignores cursor events its webview can't see the mouse at all, so a background
 //! thread watches the global cursor and enables events only while the cursor is over one
 //! of the regions the page reported (the pet, its bubble, its badge). The same loop feeds
-//! the cursor position to the page so the pet can look at it.
+//! the cursor position to the page, wherever it is on screen, so the pet can watch it.
 
 use serde::Deserialize;
 use std::sync::Mutex;
@@ -29,9 +29,6 @@ impl Rect {
 
 static REGIONS: Mutex<Vec<Rect>> = Mutex::new(Vec::new());
 
-/// How far outside the window (CSS px) the pet keeps following the cursor with its eyes.
-const REACH: f64 = 420.0;
-
 #[tauri::command]
 pub async fn set_hit_regions(rects: Vec<Rect>) {
     *REGIONS.lock().unwrap() = rects;
@@ -41,14 +38,16 @@ pub fn start(app: AppHandle) {
     std::thread::spawn(move || {
         let mut interactive: Option<bool> = None;
         let mut last_sent: Option<(i32, i32)> = None;
+        let mut still = 0u32;
         loop {
-            let near = tick(&app, &mut interactive, &mut last_sent);
-            std::thread::sleep(Duration::from_millis(if near { 33 } else { 150 }));
+            still = if tick(&app, &mut interactive, &mut last_sent) { 0 } else { still.saturating_add(1) };
+            // Smooth while the mouse moves (and for a moment after), relaxed while it rests.
+            std::thread::sleep(Duration::from_millis(if still < 15 { 33 } else { 120 }));
         }
     });
 }
 
-/// Returns whether the cursor is near the pet (so the caller can poll faster).
+/// Returns whether the cursor moved.
 fn tick(app: &AppHandle, interactive: &mut Option<bool>, last_sent: &mut Option<(i32, i32)>) -> bool {
     let Some(win) = app.get_webview_window("pet") else {
         return false;
@@ -57,12 +56,7 @@ fn tick(app: &AppHandle, interactive: &mut Option<bool>, last_sent: &mut Option<
         *interactive = None;
         return false;
     }
-    let (Ok(cursor), Ok(pos), Ok(size), Ok(scale)) = (
-        app.cursor_position(),
-        win.outer_position(),
-        win.inner_size(),
-        win.scale_factor(),
-    ) else {
+    let (Ok(cursor), Ok(pos), Ok(scale)) = (app.cursor_position(), win.outer_position(), win.scale_factor()) else {
         return false;
     };
     let x = (cursor.x - pos.x as f64) / scale;
@@ -79,16 +73,11 @@ fn tick(app: &AppHandle, interactive: &mut Option<bool>, last_sent: &mut Option<
         *interactive = Some(inside);
     }
 
-    let (w, h) = (size.width as f64 / scale, size.height as f64 / scale);
-    let near = x > -REACH && y > -REACH && x < w + REACH && y < h + REACH;
-    if near {
-        let p = (x.round() as i32, y.round() as i32);
-        if *last_sent != Some(p) {
-            let _ = app.emit_to("pet", "pet-cursor", (x, y));
-            *last_sent = Some(p);
-        }
-    } else if last_sent.take().is_some() {
-        let _ = app.emit_to("pet", "pet-cursor-away", ());
+    let p = (x.round() as i32, y.round() as i32);
+    if *last_sent == Some(p) {
+        return false;
     }
-    near
+    let _ = app.emit_to("pet", "pet-cursor", (x, y));
+    *last_sent = Some(p);
+    true
 }
