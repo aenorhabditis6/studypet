@@ -32,17 +32,27 @@ fn normalize_url(url: &str) -> Result<String, String> {
     }
 }
 
+/// Why a feed couldn't be read, naming the site but never the link: it's secret, and the
+/// message is shown in Settings. Network trouble starts with "暂时连不上" (the page retries soon).
+fn fetch_error(url: &str, e: reqwest::Error) -> String {
+    let host = reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_string))
+        .unwrap_or_else(|| "日历服务器".into());
+    if e.is_timeout() || e.is_connect() || e.is_request() {
+        format!("暂时连不上 {host}（可能没联网），稍后会自动重试")
+    } else {
+        format!("读取 {host} 的日历出错了：{}", e.without_url())
+    }
+}
+
 async fn fetch_ics(url: &str) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(25))
         .user_agent("StudyPet/0.1")
         .build()
         .map_err(|e| e.to_string())?;
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("连不上这个链接：{e}"))?;
+    let resp = client.get(url).send().await.map_err(|e| fetch_error(url, e))?;
     let status = resp.status();
     if !status.is_success() {
         return Err(format!("服务器返回了 {status}，链接可能失效了"));
@@ -50,7 +60,7 @@ async fn fetch_ics(url: &str) -> Result<String, String> {
     if resp.content_length().is_some_and(|n| n as usize > MAX_FEED_BYTES) {
         return Err("日历文件太大了".into());
     }
-    let text = resp.text().await.map_err(|e| e.to_string())?;
+    let text = resp.text().await.map_err(|e| fetch_error(url, e))?;
     if !text.contains("BEGIN:VCALENDAR") {
         return Err("这个链接返回的不是日历（.ics）内容".into());
     }
@@ -77,6 +87,16 @@ pub async fn source_fetch(id: String) -> Result<String, String> {
         .get_password()
         .map_err(|e| format!("钥匙串里找不到这个日历链接：{e}"))?;
     fetch_ics(&url).await
+}
+
+/// Which of these saved calendars (if any) already has this link, so the same one isn't added
+/// twice. The links are compared here, the only place allowed to read them.
+#[tauri::command]
+pub async fn source_find(url: String, ids: Vec<String>) -> Result<Option<String>, String> {
+    let url = normalize_url(&url)?;
+    Ok(ids
+        .into_iter()
+        .find(|id| entry(id).and_then(|e| e.get_password().map_err(|e| e.to_string())).is_ok_and(|saved| saved == url)))
 }
 
 /// Used by onboarding to test a link before saving it.

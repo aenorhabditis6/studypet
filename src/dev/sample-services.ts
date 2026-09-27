@@ -11,8 +11,10 @@ function gsDate(ts: number): string {
 }
 
 export function sampleGradescopeDashboard(): string {
-  return `<!doctype html><html><body>
+  return `<!doctype html><html><head><title>Your Courses | Gradescope</title></head><body>
 <div id="account-show">
+  <h1 class="pageHeading">Your Courses</h1>
+  <button class="tiiBtn js-createNewCourse" type="button">Create Course</button>
   <div class="courseList">
     <div class="courseList--term pageSubheading">Fall 2026</div>
     <div class="courseList--coursesForTerm">
@@ -28,12 +30,14 @@ export function sampleGradescopeDashboard(): string {
       </a>
       <button class="courseBox courseBox-new">Add a course</button>
     </div>
-    <div class="courseList--term pageSubheading">Spring 2026</div>
-    <div class="courseList--coursesForTerm">
-      <a class="courseBox" href="/courses/800001">
-        <h3 class="courseBox--shortname">CS 161</h3>
-        <div class="courseBox--name">Algorithms</div>
-      </a>
+    <div class="courseList--inactiveCourses">
+      <div class="courseList--term pageSubheading">Spring 2026</div>
+      <div class="courseList--coursesForTerm">
+        <a class="courseBox" href="/courses/800001">
+          <h3 class="courseBox--shortname">CS 161</h3>
+          <div class="courseBox--name">Algorithms</div>
+        </a>
+      </div>
     </div>
   </div>
 </div></body></html>`;

@@ -139,7 +139,7 @@ pub async fn gradescope_fetch(app: AppHandle, site: String, path: String) -> Res
     if !cookie.is_empty() {
         req = req.header(reqwest::header::COOKIE, cookie);
     }
-    let resp = req.send().await.map_err(|e| format!("连不上 Gradescope：{e}"))?;
+    let resp = req.send().await.map_err(|e| format!("连不上 Gradescope：{}", e.without_url()))?;
     let final_url = resp.url().to_string();
     let status = resp.status().as_u16();
     let html = resp.text().await.map_err(|e| e.to_string())?;
@@ -257,7 +257,7 @@ async fn ed_get(region: &str, token: &str, path: &str) -> Result<String, String>
         .bearer_auth(token)
         .send()
         .await
-        .map_err(|e| format!("连不上 Ed：{e}"))?;
+        .map_err(|e| format!("连不上 Ed：{}", e.without_url()))?;
     match resp.status().as_u16() {
         200..=299 => resp.text().await.map_err(|e| e.to_string()),
         401 | 403 => Err("Ed 不认这个 token（可能输错了或者过期了）".into()),

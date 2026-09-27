@@ -366,6 +366,8 @@ select:focus {
   padding: 0;
   margin: 12px 0 0;
   display: grid;
+  /* One column as wide as the panel, however long a row's text is. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
 }
 .source-list li {
@@ -390,6 +392,13 @@ select:focus {
 .source-list .grow span {
   color: var(--muted);
   font-size: 12px;
+}
+.source-list .name,
+.source-list .grow span {
+  overflow-wrap: anywhere;
+}
+.source-list li > .btn {
+  flex-shrink: 0;
 }
 .source-list .grow span.bad {
   color: var(--bad);

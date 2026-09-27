@@ -50,36 +50,49 @@ const text = (el: Element | null | undefined) => (el?.textContent ?? "").replace
 /**
  * Student courses of the newest term on the dashboard, or null when the page isn't the
  * logged-in dashboard (i.e. the session expired).
+ *
+ * The heading before each course list says whose courses they are ("Instructor Courses",
+ * "Student Courses"). Lists without such a heading are the user's own: a student's dashboard
+ * is just "Your Courses" — even when it offers a "Create Course" button — so only pages with
+ * explicit staff sections need telling apart.
  */
 export function parseDashboard(html: string): GsCourse[] | null {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const account = doc.querySelector("#account-show");
   if (!account) return null;
 
-  // Staff see "Instructor Courses" first and "Student Courses" after; students see no headings.
-  let section = doc.querySelector("button.js-createNewCourse") ? "instructor" : "student";
-  let term = "";
-  let newestStudentTerm: string | null = null;
-  const courses = new Map<string, GsCourse>();
-  for (const el of account.querySelectorAll("h2.pageHeading, .courseList--term, a[href^='/courses/']")) {
-    if (el.matches("h2.pageHeading")) {
-      section = /student/i.test(text(el)) ? "student" : "instructor";
-    } else if (el.matches(".courseList--term")) {
-      term = text(el);
-    } else if (section === "student") {
-      const id = (el.getAttribute("href") ?? "").split("/")[2] ?? "";
-      const shortname = el.querySelector(".courseBox--shortname");
-      if (!/^\d+$/.test(id) || !shortname) continue;
-      newestStudentTerm ??= term;
-      if (term !== newestStudentTerm) continue;
-      courses.set(id, {
-        id,
-        name: text(shortname),
-        fullName: text(el.querySelector(".courseBox--name")) || undefined,
-        term: term || undefined,
-      });
+  const lists = [...account.querySelectorAll(".courseList")].filter((list) => !list.parentElement?.closest(".courseList"));
+  const roles = lists.map((list) => {
+    for (let el = list.previousElementSibling; el && !el.matches(".courseList"); el = el.previousElementSibling) {
+      if (!el.matches("h1, h2, h3, .pageHeading")) continue;
+      const heading = text(el);
+      if (/instructor|teaching assistant|\bTAs?\b|staff/i.test(heading)) return "staff";
+      if (/student/i.test(heading)) return "student";
     }
-  }
+    return "unlabelled";
+  });
+  const hasStaffSection = roles.includes("staff");
+
+  const courses = new Map<string, GsCourse>();
+  let newestTerm: string | null = null;
+  lists.forEach((list, k) => {
+    if (roles[k] === "staff" || (roles[k] === "unlabelled" && hasStaffSection)) return;
+    // Terms newest first; older ones may sit in a collapsed "inactive courses" part.
+    let term = "";
+    for (const el of list.querySelectorAll(".courseList--term, a[href*='/courses/']")) {
+      if (el.matches(".courseList--term")) {
+        term = text(el);
+        continue;
+      }
+      const id = el.getAttribute("href")?.match(/\/courses\/(\d+)/)?.[1];
+      const fullName = text(el.querySelector(".courseBox--name"));
+      const name = text(el.querySelector(".courseBox--shortname")) || fullName;
+      if (!id || !name) continue;
+      newestTerm ??= term;
+      if (term !== newestTerm || courses.has(id)) continue;
+      courses.set(id, { id, name, fullName: fullName || undefined, term: term || undefined });
+    }
+  });
   return [...courses.values()];
 }
 
@@ -100,15 +113,19 @@ export function parseCourse(html: string, course: GsCourse, site = DEFAULT_GRADE
     const head = row.querySelector("th");
     if (!head) continue;
     const link = head.querySelector("a[href]");
-    const button = head.querySelector("button[data-assignment-id]");
+    const button = head.querySelector("button");
     const title = text(link ?? button ?? head);
     const href = link?.getAttribute("href") ?? "";
-    const assignmentId = button?.getAttribute("data-assignment-id") ?? href.split("/")[4] ?? "";
-    const dues = row.querySelectorAll(".submissionTimeChart--dueDate");
-    const due = parseGsDate(dues[0]?.getAttribute("datetime"));
+    const assignmentId =
+      row.querySelector("[data-assignment-id]")?.getAttribute("data-assignment-id") ?? href.match(/\/assignments\/(\d+)/)?.[1] ?? "";
+    // Due date, then the late due date if there is one (release dates aren't due dates).
+    let dues = [...row.querySelectorAll(".submissionTimeChart--dueDate")];
+    if (!dues.length) dues = [...row.querySelectorAll("time[datetime]")].filter((t) => !/release/i.test(t.className));
+    const dateOf = (el?: Element) => parseGsDate(el?.getAttribute("datetime") ?? el?.querySelector("time[datetime]")?.getAttribute("datetime"));
+    const due = dateOf(dues[0]);
     if (!title || due === undefined) continue;
     // "No Submission" until something is uploaded; afterwards "Submitted" or a score.
-    const status = text(row.querySelector("td"));
+    const status = text(row.querySelector(".submissionStatus--text") ?? row.querySelector("td"));
     items.push({
       id: `${GRADESCOPE_SOURCE}:${course.id}:${assignmentId || title}`,
       sourceId: GRADESCOPE_SOURCE,
@@ -121,7 +138,7 @@ export function parseCourse(html: string, course: GsCourse, site = DEFAULT_GRADE
       // A submitted row links to the submission; otherwise the course page, whose row button opens the upload dialog.
       url: href.startsWith("/") ? `https://${site}${href}` : `https://${site}/courses/${course.id}`,
       submitted: status !== "" && !/no submission/i.test(status),
-      lateDue: parseGsDate(dues[1]?.getAttribute("datetime")),
+      lateDue: dateOf(dues[1]),
     });
   }
   return items;

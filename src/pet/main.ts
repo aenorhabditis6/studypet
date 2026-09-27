@@ -374,17 +374,31 @@ async function onTuck(side: Side | null) {
 // ---------------------------------------------------------------------------
 // Clock: sync, reminders, health
 
+let ticking = false;
+/** After a failed sync (often: no network yet after waking up), try again soon, backing off. */
+let retryDelay = 0;
+let retryAt = 0;
+
 async function tick() {
-  const now = Date.now();
-  const slept = now - lastTick > 3 * 60_000;
-  const r = dueReminder(lastTick, now);
-  lastTick = now;
-  applyMood();
-  if (r) speakUp(r.text, r.anim, r.force, r.item && actionFor(r.item));
-  else await health.check(now);
-  // The panel can sync too, so go by the shared timestamp.
-  const synced = Math.max(lastSync, (await (await store()).get<number>(keys.lastSync)) ?? 0);
-  if (slept || now - synced > SYNC_EVERY) await sync(slept ? "wake" : "interval");
+  // Timers held back during sleep can fire all at once on wake: one tick at a time.
+  if (ticking) return;
+  ticking = true;
+  try {
+    const now = Date.now();
+    const slept = now - lastTick > 3 * 60_000;
+    const r = dueReminder(lastTick, now);
+    lastTick = now;
+    applyMood();
+    if (r) speakUp(r.text, r.anim, r.force, r.item && actionFor(r.item));
+    else await health.check(now);
+    // The panel can sync too, so go by the shared timestamp.
+    const synced = Math.max(lastSync, (await (await store()).get<number>(keys.lastSync)) ?? 0);
+    if (slept) await sync("wake");
+    else if (now - synced > SYNC_EVERY) await sync("interval");
+    else if (retryAt && now >= retryAt) await sync("retry");
+  } finally {
+    ticking = false;
+  }
 }
 
 let serviceTimer = 0;
@@ -428,6 +442,8 @@ async function sync(reason: string, announce = false) {
   try {
     const r = await syncAll();
     log(`sync (${reason}):`, r);
+    retryDelay = r.failed ? Math.min(SYNC_EVERY, retryDelay ? retryDelay * 2 : 2 * 60_000) : 0;
+    retryAt = retryDelay ? Date.now() + retryDelay : 0;
     if (announce) speak(r.failed ? "有来源没同步成功，去面板里看看？" : "同步好啦～");
   } catch (e) {
     log("sync failed:", errorText(e));

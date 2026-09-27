@@ -26,7 +26,7 @@ assert.deepEqual(
 );
 assert.equal(parseDashboard("<html><body><h1>Gradescope</h1><a href='/login'>Log In</a></body></html>"), null, "logged out");
 
-// Staff who also take classes: instructor courses are skipped.
+// Staff who also take classes: instructor and TA courses are skipped.
 const mixed = `<div id="account-show"><button class="js-createNewCourse">Create</button>
   <h2 class="pageHeading">Instructor Courses</h2>
   <div class="courseList"><div class="courseList--term">Fall 2026</div>
@@ -35,6 +35,12 @@ const mixed = `<div id="account-show"><button class="js-createNewCourse">Create<
   <div class="courseList"><div class="courseList--term">Fall 2026</div>
     <a href="/courses/222"><h3 class="courseBox--shortname">MATH 51</h3></a></div></div>`;
 assert.deepEqual(parseDashboard(mixed)!.map((c) => c.id), ["222"]);
+const ta = mixed.replace("Instructor Courses", "TA Courses");
+assert.deepEqual(parseDashboard(ta)!.map((c) => c.id), ["222"]);
+// A student-only page with no headings at all, and course boxes without a short name.
+const bare = `<div id="account-show"><div class="courseList"><div class="courseList--term">Autumn 2026</div>
+  <div class="courseList--coursesForTerm"><a class="courseBox" href="/courses/1398687"><div class="courseBox--name">Numerical Linear Algebra</div></a></div></div></div>`;
+assert.deepEqual(parseDashboard(bare), [{ id: "1398687", name: "Numerical Linear Algebra", fullName: "Numerical Linear Algebra", term: "Autumn 2026" }]);
 
 // Course page.
 const items = parseCourse(sampleGradescopeCourse("900001", now), courses[0])!;

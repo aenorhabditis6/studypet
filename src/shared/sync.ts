@@ -1,4 +1,4 @@
-import { emit, errorText, invoke } from "./bridge";
+import { emit, errorText, invoke, log } from "./bridge";
 import { ED_SOURCE, fetchEd, type EdUserResponse } from "./ed";
 import { DEFAULT_GRADESCOPE_SITE, fetchGradescope, GRADESCOPE_SOURCE } from "./gradescope";
 import { countKinds, dedupe, parseIcs } from "./ics";
@@ -47,6 +47,12 @@ async function doSync(): Promise<SyncResult> {
         const { items } = parseIcs(text, s.id, s.kind);
         next.push(...items);
         s.counts = countKinds(items);
+        // Counts only, never titles or links: enough to tell a quiet feed from a misread one.
+        const inFeed = (re: RegExp) => (text.match(re) ?? []).length;
+        log(
+          `calendar ${s.kind}: ${inFeed(/^BEGIN:VEVENT/gm)} in feed, ${inFeed(/^UID:event-assignment/gm)} marked as assignments` +
+            ` → ${s.counts.deadlines} deadlines, ${s.counts.events} events in range`,
+        );
       }
       s.lastSync = Date.now();
       s.lastError = null;
@@ -67,6 +73,9 @@ async function doSync(): Promise<SyncResult> {
 
 /** Tests the link, stores it in the keychain, and merges its items. Throws a readable message. */
 export async function addSource(kind: SourceKind, url: string): Promise<{ source: Source; counts: Counts }> {
+  const calendars = (await getSources()).filter((s) => s.kind !== "gradescope" && s.kind !== "ed");
+  const same = await invoke<string | null>("source_find", { url, ids: calendars.map((s) => s.id) });
+  if (same) throw new Error(`这个日历已经加过了（「${calendars.find((s) => s.id === same)?.name}」）`);
   const text = await invoke<string>("ics_fetch_url", { url });
   const id = crypto.randomUUID();
   const { items, calName } = parseIcs(text, id, kind);

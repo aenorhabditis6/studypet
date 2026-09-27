@@ -142,6 +142,7 @@ pub fn run() {
             sources::source_save,
             sources::source_delete,
             sources::source_fetch,
+            sources::source_find,
             sources::ics_fetch_url,
             services::open_service,
             services::gradescope_fetch,
