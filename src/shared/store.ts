@@ -36,6 +36,8 @@ export const keys = {
   /** Where the pet sits: its body centre in physical screen px, and whether it's tucked at an edge. */
   petAt: "petAt",
   session: "session",
+  /** Finished pomodoros and focus-mode stretches (FocusSpan[]), for "focused today". */
+  focusLog: "focusLog",
 } as const;
 
 /** Item id → when it was marked done. */

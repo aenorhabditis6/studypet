@@ -5,8 +5,9 @@
 // the apps in Settings → focus are "locked": hidden whenever they come to the front.
 import { errorText, inTauri, invoke, log } from "../shared/bridge";
 import * as lines from "../shared/lines";
+import { addSpan } from "../shared/focus";
 import { keys, store } from "../shared/store";
-import type { Session, Settings } from "../shared/types";
+import type { FocusSpan, Session, Settings } from "../shared/types";
 
 const MIN = 60_000;
 
@@ -34,6 +35,8 @@ export class Sessions {
     const saved = (await (await store()).get<Session | null>(keys.session)) ?? null;
     if (!saved) return;
     if (saved.endsAt && saved.endsAt <= Date.now()) {
+      // Finished while the app was closed: it still counts.
+      await this.record(saved, saved.endsAt);
       await this.set(null);
       return;
     }
@@ -58,7 +61,7 @@ export class Sessions {
   async startFocus() {
     await this.host.showUp();
     await this.replace({ kind: "focus", startedAt: Date.now(), lock: true });
-    this.host.say(this.hasApps() ? lines.FOCUS_ON : "专注模式开启！我先不打扰你～");
+    this.host.say(lines.focusOn(this.hasApps()));
   }
 
   async stop() {
@@ -99,7 +102,16 @@ export class Sessions {
     const was = this.current;
     if (was?.lock && !next?.lock) await this.lockApps(false);
     if (next?.lock && !was?.lock) await this.lockApps(true);
+    if (was) await this.record(was, Date.now());
     await this.set(next);
+  }
+
+  /** A pomodoro or focus stretch that just ended goes into the focus log (breaks don't count). */
+  private async record(s: Session, end: number) {
+    if (s.kind === "break") return;
+    const kv = await store();
+    const log = (await kv.get<FocusSpan[]>(keys.focusLog)) ?? [];
+    await kv.set(keys.focusLog, addSpan(log, { start: s.startedAt, end: Math.min(end, s.endsAt ?? end) }));
   }
 
   private async set(next: Session | null) {

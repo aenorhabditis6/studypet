@@ -898,3 +898,13 @@ textarea {
   font-size: 13px;
   color: var(--accent);
 }
+
+.focus-today {
+  margin: 0;
+  font-size: 14px;
+}
+.focus-total {
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}

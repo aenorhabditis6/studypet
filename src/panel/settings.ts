@@ -6,7 +6,8 @@ import { DEFAULT_GRADESCOPE_SITE, GRADESCOPE_SITES, gradescopeHome } from "../sh
 import * as lines from "../shared/lines";
 import { openService } from "../shared/services";
 import { connectEd, connectGradescope, removeSource } from "../shared/sync";
-import { WECHAT, type EdRegion, type PetInfo, type Settings, type Source } from "../shared/types";
+import { focusedToday, focusText } from "../shared/focus";
+import { WECHAT, type EdRegion, type FocusSpan, type PetInfo, type Session, type Settings, type Source } from "../shared/types";
 import type { PetView } from "../pet/sprite";
 import { button, confirmAction, h, petPreview } from "./dom";
 import type { Nav } from "./main";
@@ -15,6 +16,7 @@ import { builtInChoices, uploadChoices, uploadPet, useBuiltIn } from "./pet-pick
 
 export async function renderSettings(root: HTMLElement, nav: Nav): Promise<() => void> {
   const [pet, settings] = await Promise.all([invoke<PetInfo | null>("get_pet"), getSettings()]);
+  lines.setPetName(pet?.name ?? "");
   const save = async (patch: Partial<Settings>) => {
     await (await store()).set(keys.settings, { ...(await getSettings()), ...patch });
     await emit("settings-changed");
@@ -160,8 +162,8 @@ export async function renderSettings(root: HTMLElement, nav: Nav): Promise<() =>
       h(
         "ul",
         { class: "plain" },
-        h("li", null, "日历链接和 Ed token 存在系统钥匙串里，App 界面拿不到明文。"),
-        h("li", null, "Gradescope 的登录只留在内置窗口里；我只读你自己的课程页（作业名、截止时间、交没交）。"),
+        h("li", null, "日历链接、Ed token 和 Gradescope 的登录存在系统钥匙串里，App 界面拿不到明文。"),
+        h("li", null, "Gradescope 只读你自己的课程页（作业名、截止时间、交没交）；断开连接会删掉保存的登录。"),
         h("li", null, "作业、日程和公告只保存在这台电脑上，不会上传。"),
         h("li", null, "现在还没有接入任何 AI 服务；以后加聊天功能时会先问你。"),
       ),
@@ -364,6 +366,20 @@ function healthSection(settings: Settings, save: Save): HTMLElement {
   );
 }
 
+/** Today's focus time: pomodoros and focus mode, overlaps once. Refreshes while it's on screen. */
+function focusedTodayLine(): HTMLElement {
+  const value = h("b", { class: "focus-total" }, "…");
+  const line = h("p", { class: "focus-today" }, "今天已专注 ", value);
+  const update = async () => {
+    const kv = await store();
+    const [log, running] = await Promise.all([kv.get<FocusSpan[]>(keys.focusLog), kv.get<Session | null>(keys.session)]);
+    value.textContent = focusText(focusedToday(log ?? [], running ?? null));
+  };
+  void update();
+  const timer = window.setInterval(() => (line.isConnected ? void update() : window.clearInterval(timer)), 20_000);
+  return line;
+}
+
 async function focusSection(settings: Settings, save: Save): Promise<HTMLElement> {
   const pomo = settings.pomodoro;
   const running = (await invoke<{ bundleId: string; name: string }[] | null>("running_apps").catch(() => null)) ?? [];
@@ -404,7 +420,8 @@ async function focusSection(settings: Settings, save: Save): Promise<HTMLElement
     "section",
     { class: "block" },
     h("h2", null, "番茄钟和专注"),
-    h("p", { class: "hint" }, "右键宠物就能开始番茄钟或专注模式。专注时宠物只在作业快截止、快上课时说话。"),
+    focusedTodayLine(),
+    h("p", { class: "hint" }, "番茄钟和专注模式都算，重叠的时间只算一次，休息不算。右键宠物就能开始番茄钟或专注模式；专注时宠物只在作业快截止、快上课时说话。"),
     h(
       "div",
       { class: "field" },

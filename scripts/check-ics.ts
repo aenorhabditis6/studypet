@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { isOptionalEvent, outlook, remindableEvents } from "../src/shared/agenda.ts";
 import { meetingName, relative, splitLocation } from "../src/shared/format.ts";
 import { dedupe, parseIcs, shortCourse } from "../src/shared/ics.ts";
+import { addSpan, focusText, focusedToday } from "../src/shared/focus.ts";
 import { sampleCanvasIcs } from "../src/dev/sample-ics.ts";
 
 const H = 3_600_000;
@@ -92,5 +93,29 @@ assert.ok(!remindableEvents(items, now, now + 60 * D).some(isOptionalEvent));
 assert.ok(remindableEvents(items, now, now + 60 * D).some((i) => i.title === "CS 61C Lecture"));
 assert.equal(shortCourse("Linguistics"), "Linguistics");
 assert.equal(shortCourse("Introduction to Psychology"), "Introduction to…", "long names are truncated for the chip");
+
+
+// Focused today: pomodoros and focus mode, overlaps once, breaks and yesterday not at all.
+{
+  const noon = new Date();
+  noon.setHours(12, 0, 0, 0);
+  const t = noon.getTime();
+  const M = 60_000;
+  const log = [
+    { start: t - 13 * 60 * M, end: t - 11 * 60 * M }, // 23:00 yesterday → 01:00: only the hour after midnight
+    { start: t - 60 * M, end: t - 35 * M }, // a 25-minute pomodoro
+    { start: t - 40 * M, end: t - 20 * M }, // focus mode overlapping it by 5 minutes
+  ];
+  assert.equal(focusedToday(log, null, t), (60 + 25 + 15) * M);
+  const pomodoro = { kind: "pomodoro" as const, startedAt: t - 10 * M, endsAt: t + 15 * M, lock: false };
+  assert.equal(focusedToday(log, pomodoro, t), (60 + 25 + 15 + 10) * M, "the running pomodoro so far");
+  const rest = { kind: "break" as const, startedAt: t - 10 * M, endsAt: t + 5 * M, lock: false };
+  assert.equal(focusedToday(log, rest, t), (60 + 25 + 15) * M, "breaks don't count");
+  assert.equal(focusedToday([], null, t), 0);
+  assert.equal(addSpan([{ start: t - 20 * 86_400_000, end: t - 20 * 86_400_000 + M }], { start: t - M, end: t }, t).length, 1, "old spans are dropped");
+  assert.equal(focusText(0), "0 分钟");
+  assert.equal(focusText(83 * M), "1 小时 23 分钟");
+  assert.equal(focusText(120 * M), "2 小时");
+}
 
 console.log(`\nall checks passed (${items.length} items, tz ${Intl.DateTimeFormat().resolvedOptions().timeZone})`);

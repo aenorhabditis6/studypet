@@ -1,7 +1,6 @@
 // The pet window: a transparent, always-on-top window holding the pet, its speech bubble,
 // a badge, a timer pill and (when tucked at an edge) a dot. This page is also the app's
 // "brain": it syncs, watches the clock, and decides when the pet should say something.
-import { Menu } from "@tauri-apps/api/menu";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { DAY, HOUR, openDeadlines, outlook, remindableEvents, type Level, type Outlook } from "../shared/agenda";
@@ -120,6 +119,7 @@ async function main() {
     return;
   }
   pet = info;
+  lines.setPetName(info.name);
   settings = await getSettings();
   try {
     const bytes = await invoke<ArrayBuffer>("get_pet_image");
@@ -588,46 +588,37 @@ function wireInput() {
   });
 }
 
+/** The right-click menu (built natively; a click comes back as a "pet-menu" event). */
 async function showMenu() {
   hideBubble();
   if (!inTauri) return;
   const s = sessions.current;
-  const { focusMin } = settings.pomodoro;
-  const focusItems = !s
-    ? [
-        { id: "pomo", text: `开始番茄钟（${focusMin} 分钟）`, action: () => void sessions.startPomodoro(focusMin) },
-        { id: "pomo2", text: `开始番茄钟（${focusMin * 2} 分钟）`, action: () => void sessions.startPomodoro(focusMin * 2) },
-        { id: "focus", text: "开启专注模式（锁住微信）", action: () => void sessions.startFocus() },
-      ]
-    : [
-        {
-          id: "stop",
-          text: s.kind === "focus" ? "结束专注模式" : s.kind === "break" ? "跳过休息" : "结束番茄钟",
-          action: () => void sessions.stop(),
-        },
-        ...(s.lock ? [{ id: "unlock", text: "解锁 5 分钟", action: () => void sessions.unlockFor(5) }] : []),
-      ];
-  const menu = await Menu.new({
-    items: [
-      { id: "today", text: "今天有什么", action: () => void invoke("show_panel", { view: "today" }) },
-      { id: "sync", text: "现在同步", action: () => void sync("manual", true) },
-      { item: "Separator" },
-      ...focusItems,
-      { item: "Separator" },
-      { id: "gradescope", text: "打开 Gradescope", action: () => void openService("gradescope") },
-      { id: "ed", text: "打开 Ed", action: () => void openService("ed") },
-      { item: "Separator" },
-      ...(motion.tucked ? [{ id: "untuck", text: "结束组会模式", action: () => void motion.untuck() }] : []),
-      { id: "settings", text: "设置…", action: () => void invoke("show_panel", { view: "settings" }) },
-      { item: "Separator" },
-      { id: "hide", text: "先藏起来（菜单栏图标里找我）", action: () => void invoke("set_pet_visible", { visible: false }) },
-      { id: "quit", text: "退出 StudyPet", action: () => void invoke("quit_app") },
-    ],
-  });
-  await menu.popup();
+  await invoke("show_pet_menu", {
+    state: { session: s?.kind ?? null, locked: !!s?.lock, tucked: !!motion.tucked, focusMin: settings.pomodoro.focusMin },
+  }).catch((e) => log("menu:", errorText(e)));
 }
 
+const MENU_ACTIONS: Record<string, () => unknown> = {
+  today: () => invoke("show_panel", { view: "today" }),
+  sync: () => sync("manual", true),
+  pomo: () => sessions.startPomodoro(settings.pomodoro.focusMin),
+  pomo2: () => sessions.startPomodoro(settings.pomodoro.focusMin * 2),
+  focus: () => sessions.startFocus(),
+  stop: () => sessions.stop(),
+  unlock: () => sessions.unlockFor(5),
+  gradescope: () => openService("gradescope"),
+  ed: () => openService("ed"),
+  untuck: () => motion.untuck(),
+  settings: () => invoke("show_panel", { view: "settings" }),
+  hide: () => invoke("set_pet_visible", { visible: false }),
+  quit: () => invoke("quit_app"),
+};
+
 async function wireEvents() {
+  await listen<string>("pet-menu", (id) => {
+    log(`menu: ${id}`);
+    void Promise.resolve(MENU_ACTIONS[id]?.()).catch((e) => log(`menu ${id} failed:`, errorText(e)));
+  });
   await listen("data-updated", () => void refresh());
   await listen("sync-request", () => void sync("panel"));
   await listen<[string, string]>("service-page", ([service, url]) => onServicePage(service, url));

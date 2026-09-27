@@ -1,6 +1,7 @@
 mod focus;
 mod hittest;
 mod pet;
+mod petmenu;
 mod services;
 mod sources;
 mod vault;
@@ -145,6 +146,7 @@ pub fn run() {
             sources::source_fetch,
             sources::source_find,
             services::gradescope_forget,
+            petmenu::show_pet_menu,
             sources::ics_fetch_url,
             services::open_service,
             services::gradescope_fetch,
@@ -185,6 +187,7 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            petmenu::forward_clicks(app.handle());
             hittest::start(app.handle().clone());
             focus::start(app.handle().clone());
 

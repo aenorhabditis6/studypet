@@ -116,6 +116,12 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 /** A pomodoro, its break, or open-ended focus mode. */
+/** A finished stretch of focus time (a pomodoro or focus mode). */
+export interface FocusSpan {
+  start: number;
+  end: number;
+}
+
 export interface Session {
   kind: "pomodoro" | "break" | "focus";
   startedAt: number;

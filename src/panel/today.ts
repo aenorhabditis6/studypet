@@ -25,6 +25,7 @@ export async function renderToday(root: HTMLElement, nav: Nav): Promise<() => vo
     getNotices(),
     getEdCourses(),
   ]);
+  lines.setPetName(pet?.name ?? "");
   const now = Date.now();
   const o = outlook(items, done, now);
 
