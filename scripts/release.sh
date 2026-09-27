@@ -45,7 +45,7 @@ codesign --verify --deep --strict "$APP"
 mkdir -p release
 ZIP="release/StudyPet-$VERSION-macos.zip"
 rm -f "$ZIP"
-ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
+ditto -c -k --keepParent "$APP" "$ZIP"
 
 # 4. Record the release in the private repo, then publish only the zip.
 git commit -qam "Release v$VERSION" || true
