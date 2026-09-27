@@ -7,6 +7,7 @@
 //   count of each row is detected from the pixels.
 // - A single picture: animated with CSS (breathing, hopping, tilting).
 import "./sprite.css";
+import { cutout } from "./cutout";
 
 export type Anim =
   | "idle"
@@ -343,43 +344,72 @@ class AtlasView implements PetView {
 // ---------------------------------------------------------------------------
 // Single picture
 
-const ONCE_MS: Partial<Record<Anim, number>> = { waving: 900, jumping: 700, failed: 1100 };
+/** How long each one-off animation of a picture pet lasts (ms). */
+const ONCE_MS: Partial<Record<Anim | IdleAct, number>> = {
+  waving: 900,
+  jumping: 800,
+  failed: 1100,
+  hop: 560,
+  wiggle: 720,
+  lean: 1300,
+  squish: 520,
+};
+
+/** Little things a picture pet does now and then while idle, so it feels alive. */
+type IdleAct = "hop" | "wiggle" | "lean" | "squish";
+const IDLE_ACTS: IdleAct[] = ["hop", "wiggle", "lean", "squish"];
 
 class ImageView implements PetView {
   readonly el: HTMLDivElement;
   readonly width: number;
   readonly height: number;
   readonly body: Box;
-  private inner: HTMLImageElement;
+  /** Leans toward the cursor; the animated picture sits inside it. */
+  private lookLayer: HTMLDivElement;
   private onceTimer = 0;
+  private idleTimer = 0;
   private pending: (() => void) | null = null;
 
   constructor(img: HTMLImageElement, height: number) {
-    const aspect = img.naturalWidth / img.naturalHeight || 1;
+    // Plain backgrounds (photos, stickers on white) are removed and the picture cropped.
+    const { canvas, removed } = cutout(img);
+    const aspect = canvas.width / canvas.height || 1;
     // Fit into height × (1.4 · height) so very wide pictures don't overflow the window.
     const maxW = height * 1.4;
     this.height = Math.round(aspect * height > maxW ? maxW / aspect : height);
     this.width = Math.round(this.height * aspect);
     this.body = { x: 0, y: 0, w: this.width, h: this.height };
+    this.info = removed ? "background removed" : "as uploaded";
 
     this.el = document.createElement("div");
     this.el.className = "pet-image";
     this.el.style.width = `${this.width}px`;
     this.el.style.height = `${this.height}px`;
-    this.inner = img;
-    this.inner.draggable = false;
-    this.el.append(this.inner);
+    this.lookLayer = document.createElement("div");
+    this.lookLayer.className = "pet-look";
+    canvas.className = "pet-pic";
+    this.lookLayer.append(canvas);
+    this.el.append(this.lookLayer);
     this.el.dataset.base = "idle";
+    this.scheduleIdle();
   }
+
+  /** "background removed" or "as uploaded". */
+  readonly info: string;
 
   setBase(anim: Anim) {
     this.el.dataset.base = anim;
   }
 
-  play(anim: Anim, loops = 1): Promise<void> {
+  play(anim: Anim | IdleAct, loops = 1): Promise<void> {
+    if ("frozen" in this.el.dataset) return Promise.resolve();
     this.pending?.();
     clearTimeout(this.onceTimer);
+    // Restart the animation even if the same one is already showing.
+    delete this.el.dataset.once;
+    void this.el.offsetWidth;
     this.el.dataset.once = anim;
+    this.el.style.setProperty("--loops", String(loops));
     return new Promise((done) => {
       this.pending = done;
       this.onceTimer = window.setTimeout(() => {
@@ -396,22 +426,39 @@ class ImageView implements PetView {
   }
 
   freeze(on: boolean) {
-    if (on) this.el.dataset.frozen = "";
-    else delete this.el.dataset.frozen;
+    if (on) {
+      this.el.dataset.frozen = "";
+      delete this.el.dataset.once;
+    } else {
+      delete this.el.dataset.frozen;
+    }
   }
 
   look(angle: number | null) {
     if (angle === null) {
-      this.inner.style.translate = "";
+      this.lookLayer.style.translate = "";
+      this.lookLayer.style.rotate = "";
       return;
     }
     const rad = (angle * Math.PI) / 180;
-    this.inner.style.translate = `${(Math.sin(rad) * 4).toFixed(1)}px ${(-Math.cos(rad) * 3).toFixed(1)}px`;
+    this.lookLayer.style.translate = `${(Math.sin(rad) * 5).toFixed(1)}px ${(-Math.cos(rad) * 3).toFixed(1)}px`;
+    this.lookLayer.style.rotate = `${(Math.sin(rad) * 7).toFixed(1)}deg`;
   }
 
   destroy() {
     clearTimeout(this.onceTimer);
+    clearTimeout(this.idleTimer);
     this.pending?.();
     this.el.remove();
+  }
+
+  /** Every few seconds while idle: a hop, a wiggle, a lean or a squish. */
+  private scheduleIdle() {
+    this.idleTimer = window.setTimeout(() => {
+      const d = this.el.dataset;
+      const idle = !("once" in d) && !("moving" in d) && !("frozen" in d) && (d.base === "idle" || d.base === "waiting");
+      if (idle) void this.play(IDLE_ACTS[Math.floor(Math.random() * IDLE_ACTS.length)]);
+      this.scheduleIdle();
+    }, rand(3500, 8000));
   }
 }

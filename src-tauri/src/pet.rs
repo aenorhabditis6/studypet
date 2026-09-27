@@ -76,6 +76,28 @@ pub fn import_pet(app: AppHandle, path: String, origin: Option<String>) -> Resul
     Ok(info)
 }
 
+/// Gives the pet a name of the user's choosing.
+#[tauri::command]
+pub fn rename_pet(app: AppHandle, name: String) -> Result<PetInfo, String> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 24 {
+        return Err("名字要在 1 到 24 个字之间".into());
+    }
+    let mut info = read_manifest(&app).ok_or("还没有设置宠物")?;
+    info.name = name.to_string();
+    let manifest = serde_json::to_vec_pretty(&info).map_err(|e| e.to_string())?;
+    fs::write(pet_dir(&app)?.join("manifest.json"), manifest).map_err(|e| e.to_string())?;
+    let _ = app.emit("pet-changed", &info);
+    Ok(info)
+}
+
+/// Download names like "sg-11134201-822wq-mo9h05utr0gc3f" or "IMG_4032" aren't pet names.
+fn looks_generated(stem: &str) -> bool {
+    let digits = stem.chars().filter(char::is_ascii_digit).count();
+    let camera = stem.to_ascii_uppercase().starts_with("IMG") || stem.to_ascii_uppercase().starts_with("DSC");
+    camera || (stem.len() >= 12 && digits >= 4) || stem.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
 #[tauri::command]
 pub fn use_default_pet(app: AppHandle) -> Result<PetInfo, String> {
     let json: Value = serde_json::from_str(DEFAULT_MANIFEST).map_err(|e| e.to_string())?;
@@ -185,6 +207,7 @@ fn read_single_image(path: &Path) -> Result<(PetInfo, Vec<u8>), String> {
         name: path
             .file_stem()
             .map(|n| n.to_string_lossy().into_owned())
+            .filter(|n| !looks_generated(n))
             .unwrap_or_else(|| "我的宠物".into()),
         description: None,
         image_file: format!("image.{ext}"),
@@ -311,6 +334,16 @@ mod tests {
         assert_eq!(info.mime, "image/png");
         assert!(!image.is_empty());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn download_names_are_not_pet_names() {
+        assert!(looks_generated("sg-11134201-822wq-mo9h05utr0gc3f"));
+        assert!(looks_generated("IMG_4032"));
+        assert!(looks_generated("3f2a9c"));
+        assert!(!looks_generated("奶龙"));
+        assert!(!looks_generated("My Cat"));
+        assert!(!looks_generated("cloudbun2"));
     }
 
     #[test]

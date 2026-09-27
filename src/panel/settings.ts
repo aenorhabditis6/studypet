@@ -64,6 +64,7 @@ export async function renderSettings(root: HTMLElement, nav: Nav): Promise<() =>
         pet?.origin !== "default" ? button("换回 Cloudbun", () => invoke("use_default_pet"), "btn small") : null,
       ),
       petError,
+      pet ? nameField(pet.name, petError) : null,
       h("label", { class: "field" }, h("span", null, "大小"), size, sizeLabel),
     ),
   );
@@ -398,4 +399,16 @@ async function focusSection(settings: Settings, save: Save): Promise<HTMLElement
     shortcut("开始时运行", settings.dndOn, "dndOn", "StudyPet 专注开始"),
     shortcut("结束时运行", settings.dndOff, "dndOff", "StudyPet 专注结束"),
   );
+}
+
+function nameField(current: string, error: HTMLElement): HTMLElement {
+  const input = h("input", { type: "text", value: current, maxlength: 24, "aria-label": "宠物的名字" });
+  input.addEventListener("change", async () => {
+    try {
+      await invoke("rename_pet", { name: input.value }); // emits pet-changed → re-render
+    } catch (e) {
+      error.textContent = errorText(e);
+    }
+  });
+  return h("label", { class: "field" }, h("span", null, "名字"), input);
 }

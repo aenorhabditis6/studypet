@@ -12,6 +12,8 @@ import { sampleEdThreads, sampleEdUser, sampleGradescopeCourse, sampleGradescope
 const params = new URLSearchParams(location.search);
 const fresh = params.has("fresh");
 const singleImage = params.has("image");
+/** `?image=/.dev-assets/x.jpg` previews a specific picture (keep test pictures in .dev-assets/, which git ignores). */
+const imagePath = params.get("image") || "/src-tauri/icons/tray.png";
 const listeners = new Map<string, Set<(p: unknown) => void>>();
 
 const PICTURE: PetInfo = {
@@ -48,7 +50,7 @@ export async function mockInvoke<T>(cmd: string, _args?: Record<string, unknown>
     case "get_pet":
       return r(fresh && !sessionStorage.getItem("pet") ? null : singleImage ? PICTURE : CLOUDBUN);
     case "get_pet_image": {
-      const file = singleImage ? "/src-tauri/icons/tray.png" : "/src-tauri/resources/pets/cloudbun/spritesheet.webp";
+      const file = singleImage ? imagePath : "/src-tauri/resources/pets/cloudbun/spritesheet.webp";
       return r(await (await fetch(file)).arrayBuffer());
     }
     case "use_default_pet":

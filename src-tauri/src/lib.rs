@@ -136,6 +136,7 @@ pub fn run() {
             pet::get_pet_image,
             pet::import_pet,
             pet::use_default_pet,
+            pet::rename_pet,
             pet::list_codex_pets,
             sources::source_save,
             sources::source_delete,

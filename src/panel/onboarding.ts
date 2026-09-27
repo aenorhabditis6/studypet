@@ -244,7 +244,7 @@ export async function renderOnboarding(root: HTMLElement, nav: Nav): Promise<() 
 
 export function describePet(pet: PetInfo): string {
   const from = pet.origin === "default" ? "默认宠物" : pet.origin === "codex" ? "来自 Codex" : "你上传的";
-  const what = pet.kind === "codex-atlas" ? "Codex 精灵图，会用它自己的动作" : "单张图片，我来帮它动起来";
+  const what = pet.kind === "codex-atlas" ? "Codex 精灵图，会用它自己的动作" : "单张图片：自动去掉背景，我来帮它动起来";
   return `${from} · ${what}`;
 }
 

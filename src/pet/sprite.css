@@ -5,84 +5,135 @@
 
 .pet-image {
   position: relative;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
 }
 
-.pet-image img {
+.pet-look {
   width: 100%;
   height: 100%;
-  object-fit: contain;
   transform-origin: 50% 100%;
-  transition: translate 180ms ease-out;
+  transition: translate 220ms ease-out, rotate 220ms ease-out;
+}
+
+.pet-pic {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: 50% 100%;
   pointer-events: none;
   user-select: none;
   -webkit-user-drag: none;
-  animation: pet-breathe 2.8s ease-in-out infinite;
+  animation: pet-bob 2.6s ease-in-out infinite;
 }
 
-.pet-image[data-base="waiting"] img {
-  animation: pet-sway 1.6s ease-in-out infinite;
+/* Moods */
+.pet-image[data-base="waiting"] .pet-pic {
+  animation: pet-sway 1.8s ease-in-out infinite;
 }
-.pet-image[data-base="running"] img {
-  animation: pet-hop 0.5s ease-in-out infinite;
+.pet-image[data-base="running"] .pet-pic {
+  animation: pet-hop 0.42s ease-in-out infinite;
 }
-.pet-image[data-base="review"] img {
-  animation: pet-nod 2.2s ease-in-out infinite;
-}
-.pet-image[data-moving="left"] img {
-  animation: pet-hop 0.35s ease-in-out infinite;
-  rotate: -8deg;
-}
-.pet-image[data-moving="right"] img {
-  animation: pet-hop 0.35s ease-in-out infinite;
-  rotate: 8deg;
-}
-.pet-image[data-once="waving"] img {
-  animation: pet-wave 0.45s ease-in-out 2;
-}
-.pet-image[data-once="jumping"] img {
-  animation: pet-jump 0.7s cubic-bezier(0.3, 0.7, 0.4, 1) infinite;
-}
-.pet-image[data-once="failed"] img {
-  animation: pet-deflate 1.1s ease-in-out;
+.pet-image[data-base="review"] .pet-pic {
+  animation: pet-nod 2.6s ease-in-out infinite;
 }
 
-@keyframes pet-breathe {
-  0%, 100% { scale: 1 1; }
-  50% { scale: 1.02 0.975; }
+/* Being dragged */
+.pet-image[data-moving] .pet-pic {
+  animation: pet-hop 0.3s ease-in-out infinite;
+}
+.pet-image[data-moving="left"] .pet-look {
+  rotate: -10deg;
+}
+.pet-image[data-moving="right"] .pet-look {
+  rotate: 10deg;
+}
+
+/* One-off moves (clicks, celebrations, and the idle hop / wiggle / lean / squish) */
+.pet-image[data-once] .pet-pic {
+  animation-iteration-count: var(--loops, 1);
+}
+.pet-image[data-once="waving"] .pet-pic {
+  animation: pet-wave 0.45s ease-in-out calc(var(--loops, 1) * 2);
+}
+.pet-image[data-once="jumping"] .pet-pic {
+  animation: pet-jump 0.8s cubic-bezier(0.3, 0.7, 0.4, 1) var(--loops, 1);
+}
+.pet-image[data-once="failed"] .pet-pic {
+  animation: pet-deflate 1.1s ease-in-out var(--loops, 1);
+}
+.pet-image[data-once="hop"] .pet-pic {
+  animation: act-hop 0.56s ease-out var(--loops, 1);
+}
+.pet-image[data-once="wiggle"] .pet-pic {
+  animation: act-wiggle 0.72s ease-in-out var(--loops, 1);
+}
+.pet-image[data-once="lean"] .pet-pic {
+  animation: act-lean 1.3s ease-in-out var(--loops, 1);
+}
+.pet-image[data-once="squish"] .pet-pic {
+  animation: act-squish 0.52s ease-in-out var(--loops, 1);
+}
+
+/* Tucked away in meeting mode: perfectly still */
+.pet-image[data-frozen] .pet-pic,
+.pet-image[data-frozen] .pet-look {
+  animation: none !important;
+  rotate: none;
+  translate: none;
+}
+
+@keyframes pet-bob {
+  0%, 100% { translate: 0 0; scale: 1 1; }
+  50% { translate: 0 -3px; scale: 0.985 1.015; }
 }
 @keyframes pet-sway {
-  0%, 100% { rotate: -3deg; }
-  50% { rotate: 3deg; }
+  0%, 100% { rotate: -4deg; }
+  50% { rotate: 4deg; }
 }
 @keyframes pet-hop {
-  0%, 100% { translate: 0 0; scale: 1.03 0.96; }
-  50% { translate: 0 -6px; scale: 0.98 1.03; }
+  0%, 100% { translate: 0 0; scale: 1.05 0.94; }
+  45% { translate: 0 -9px; scale: 0.97 1.04; }
 }
 @keyframes pet-nod {
   0%, 70%, 100% { rotate: 0deg; }
-  80% { rotate: 4deg; }
-  90% { rotate: -2deg; }
+  80% { rotate: 5deg; }
+  90% { rotate: -3deg; }
 }
 @keyframes pet-wave {
   0%, 100% { rotate: 0deg; }
-  25% { rotate: -9deg; }
-  75% { rotate: 9deg; }
+  25% { rotate: -10deg; }
+  75% { rotate: 10deg; }
 }
 @keyframes pet-jump {
-  0% { translate: 0 0; scale: 1.08 0.9; }
-  40% { translate: 0 -22px; scale: 0.94 1.07; }
-  75% { translate: 0 0; scale: 1.06 0.92; }
+  0% { translate: 0 0; scale: 1.1 0.88; }
+  35% { translate: 0 -26px; scale: 0.92 1.1; }
+  70% { translate: 0 0; scale: 1.08 0.9; }
+  85% { scale: 0.98 1.03; }
   100% { translate: 0 0; scale: 1 1; }
 }
 @keyframes pet-deflate {
   0%, 100% { scale: 1 1; }
-  40%, 70% { scale: 1.08 0.82; }
+  40%, 70% { scale: 1.1 0.8; }
 }
-
-.pet-image[data-frozen] img {
-  animation: none !important;
-  rotate: none;
+@keyframes act-hop {
+  0% { translate: 0 0; scale: 1 1; }
+  20% { scale: 1.07 0.9; }
+  50% { translate: 0 -15px; scale: 0.95 1.07; }
+  80% { translate: 0 0; scale: 1.05 0.94; }
+  100% { scale: 1 1; }
+}
+@keyframes act-wiggle {
+  0%, 100% { rotate: 0deg; }
+  20% { rotate: -8deg; }
+  40% { rotate: 7deg; }
+  60% { rotate: -5deg; }
+  80% { rotate: 3deg; }
+}
+@keyframes act-lean {
+  0%, 100% { rotate: 0deg; translate: 0 0; }
+  30%, 70% { rotate: 9deg; translate: 4px 0; }
+}
+@keyframes act-squish {
+  0%, 100% { scale: 1 1; }
+  40% { scale: 1.1 0.86; }
+  70% { scale: 0.97 1.04; }
 }

@@ -26,3 +26,4 @@ dist-ssr
 # Release builds and local tool state
 release/
 .claude/
+.dev-assets/
