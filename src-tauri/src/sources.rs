@@ -1,19 +1,15 @@
 //! Calendar subscriptions (.ics). A feed URL works like a password — anyone holding a
-//! Canvas feed link can read that student's calendar — so URLs live in the OS keychain
-//! and only this module ever reads them back. The page keeps the non-secret metadata.
+//! Canvas feed link can read that student's calendar — so URLs live in the keychain (see
+//! `vault`) and only Rust ever reads them back. The page keeps the non-secret metadata.
 
 use std::time::Duration;
 
-const KEYCHAIN_SERVICE: &str = "com.studypet.app";
+use crate::vault;
+
 const MAX_FEED_BYTES: usize = 20 * 1024 * 1024;
 
-/// A keychain item of this app (service `com.studypet.app`).
-pub(crate) fn keychain_entry(user: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(KEYCHAIN_SERVICE, user).map_err(|e| e.to_string())
-}
-
-fn entry(id: &str) -> Result<keyring::Entry, String> {
-    keychain_entry(&format!("source:{id}"))
+fn key(id: &str) -> String {
+    format!("source:{id}")
 }
 
 /// Accepts https:// and webcal:// feeds (plain http only for local testing).
@@ -70,22 +66,17 @@ async fn fetch_ics(url: &str) -> Result<String, String> {
 #[tauri::command]
 pub async fn source_save(id: String, url: String) -> Result<(), String> {
     let url = normalize_url(&url)?;
-    entry(&id)?.set_password(&url).map_err(|e| e.to_string())
+    vault::set(&key(&id), &url)
 }
 
 #[tauri::command]
 pub async fn source_delete(id: String) -> Result<(), String> {
-    match entry(&id)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(e.to_string()),
-    }
+    vault::delete(&key(&id))
 }
 
 #[tauri::command]
 pub async fn source_fetch(id: String) -> Result<String, String> {
-    let url = entry(&id)?
-        .get_password()
-        .map_err(|e| format!("钥匙串里找不到这个日历链接：{e}"))?;
+    let url = vault::get(&key(&id))?.ok_or("钥匙串里找不到这个日历链接，删掉重新加一次吧")?;
     fetch_ics(&url).await
 }
 
@@ -94,9 +85,7 @@ pub async fn source_fetch(id: String) -> Result<String, String> {
 #[tauri::command]
 pub async fn source_find(url: String, ids: Vec<String>) -> Result<Option<String>, String> {
     let url = normalize_url(&url)?;
-    Ok(ids
-        .into_iter()
-        .find(|id| entry(id).and_then(|e| e.get_password().map_err(|e| e.to_string())).is_ok_and(|saved| saved == url)))
+    Ok(ids.into_iter().find(|id| vault::get(&key(id)).is_ok_and(|saved| saved.as_deref() == Some(url.as_str()))))
 }
 
 /// Used by onboarding to test a link before saving it.

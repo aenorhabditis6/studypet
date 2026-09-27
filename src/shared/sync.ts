@@ -156,8 +156,10 @@ export async function removeSource(id: string): Promise<void> {
     await invoke("ed_disconnect");
     await kv.set(keys.notices, []);
     await kv.set(keys.edCourses, []);
-  } else if (source?.kind !== "gradescope") {
-    // Gradescope keeps no secret of ours; its login stays in the built-in window until you log out there.
+  } else if (source?.kind === "gradescope") {
+    // Forget the saved login; the built-in window stays logged in until you log out there.
+    await invoke("gradescope_forget");
+  } else {
     await invoke("source_delete", { id });
   }
   await kv.set(

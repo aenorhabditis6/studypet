@@ -60,8 +60,8 @@ STUDYPET_SELFTEST_ICS=http://127.0.0.1:8765/canvas.ics npm run tauri dev
 
 ## 数据和隐私
 
-- 日历链接和 Ed token 相当于密码，存在**系统钥匙串**（service `com.studypet.app`），只有 Rust 那一侧能读到；页面上只保存名字、同步时间这类非敏感信息。
-- Gradescope 的登录只留在 App 内置窗口的 WebKit 里；Rust 用它读取你自己的课程页，cookie 不会交给页面代码。
+- 日历链接、Ed token 和 Gradescope 的登录 cookie 相当于密码，一起存在**系统钥匙串**的一个条目里（service `com.studypet.app`，account `vault`，见 `vault.rs`），只有 Rust 那一侧能读到；页面上只保存名字、同步时间这类非敏感信息。放在一个条目里，是因为没有 Apple 开发者签名的 App 每次更新都算"新 App"，每个条目都要重新授权一次；读一次后留在内存里，运行期间不再弹窗。
+- Gradescope 的登录在 App 内置窗口的 WebKit 里；WebKit 退出时会丢掉会话 cookie，所以读取成功后存一份到钥匙串，重启后放回去。cookie 不会交给页面代码。
 - 作业、日程、完成状态存在 `~/Library/Application Support/com.studypet.app/studypet.json`，宠物在同目录的 `pet/` 里。
 - 只连接你添加的日历链接、Gradescope 和 Ed；还没有接 AI。
 - 日志在 `~/Library/Logs/com.studypet.app/studypet.log`（只记录数量、状态，不记录内容）。
@@ -87,7 +87,7 @@ src/
 
 ## 已知限制
 
-- 开发时每次重新编译，macOS 可能在读钥匙串时弹窗确认（二进制签名变了）。正式签名的版本不会这样。
+- 每次重新编译或更新，macOS 都会在第一次读钥匙串时弹窗确认一次（ad-hoc 签名每次都不一样），选「始终允许」。想彻底不弹：在「钥匙串访问 → 证书助理 → 创建证书」建一个自签名的代码签名证书，用它签名每个版本（或者用 Apple 开发者 ID）。
 - 宠物不会出现在全屏 App 的桌面空间里（全屏演示、看视频时保持安静）。
 - 点击宠物时 App 会被激活，会把键盘焦点从你正在用的窗口抢过来；以后用 NSPanel 做成不抢焦点的窗口。
 - Gradescope 没有给学生的官方接口，这里读的是网页；Gradescope 改版的话 `src/shared/gradescope.ts` 要跟着改。Ed 的 API 也还是 beta。

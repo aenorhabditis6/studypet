@@ -3,6 +3,7 @@ mod hittest;
 mod pet;
 mod services;
 mod sources;
+mod vault;
 
 use tauri::{
     image::Image,
@@ -143,6 +144,7 @@ pub fn run() {
             sources::source_delete,
             sources::source_fetch,
             sources::source_find,
+            services::gradescope_forget,
             sources::ics_fetch_url,
             services::open_service,
             services::gradescope_fetch,

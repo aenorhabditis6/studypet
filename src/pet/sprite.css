@@ -1,6 +1,9 @@
 /* Single-picture pets: the app supplies the motion. */
 .pet-sprite {
   display: block;
+  /* Leaning toward the cursor (pets without look directions). */
+  transform-origin: 50% 100%;
+  transition: translate 220ms ease-out, rotate 220ms ease-out;
 }
 
 .pet-image {

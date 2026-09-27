@@ -68,8 +68,25 @@ export interface Point {
   y: number;
 }
 
-/** How close (CSS px) the cursor must be for the pet to turn or lean toward it. */
+/** Within this distance (CSS px) a pet whose eyes do the looking also leans toward the cursor. */
 const NEAR = 420;
+
+/** Moods in which the pet stops to look at you (not while panicking or focused on work). */
+const LOOKS_AROUND: Anim[] = ["idle", "waiting"];
+
+/** Leans toward the cursor — a little shift and tilt — or back upright. */
+function leanToward(el: HTMLElement, to: Point | null, amount: number) {
+  const d = to ? Math.hypot(to.x, to.y) : 0;
+  if (!to || !d || !amount) {
+    el.style.translate = "";
+    el.style.rotate = "";
+    return;
+  }
+  const ux = to.x / d;
+  const uy = to.y / d;
+  el.style.translate = `${(ux * 5 * amount).toFixed(1)}px ${(uy * 3 * amount).toFixed(1)}px`;
+  el.style.rotate = `${(ux * 7 * amount).toFixed(1)}deg`;
+}
 
 export interface PetView {
   readonly el: HTMLElement;
@@ -268,23 +285,27 @@ class AtlasView implements PetView {
   }
 
   look(to: Point | null) {
+    // Turns toward the cursor wherever it is on screen (not when it's on the pet itself).
+    const watching = to !== null && Math.hypot(to.x, to.y) > this.body.w * 0.45 && !this.frozen;
     let cell: [number, number] | null = null;
-    const d = to ? Math.hypot(to.x, to.y) : 0;
-    // Turns its head while the cursor is around — not when it's on the pet, or far away.
-    if (to && this.hasLook && d > this.body.w * 0.45 && d < NEAR) {
+    if (watching && this.hasLook) {
       const angle = (Math.atan2(to.x, -to.y) * 180) / Math.PI;
       const k = Math.round((((angle % 360) + 360) % 360) / 22.5) % 16;
       cell = k < 8 ? [9, k] : [10, k - 8];
     }
+    // Pets drawn without look directions (sprite version 1) lean toward it instead.
+    if (!this.hasLook) leanToward(this.el, watching ? to : null, 0.8);
     const changed = String(cell) !== String(this.lookCell);
     this.lookCell = cell;
-    if (changed && this.base === "idle" && !this.once && !this.moving) this.run();
+    if (changed && LOOKS_AROUND.includes(this.base) && !this.once && !this.moving) this.run();
   }
 
   freeze(on: boolean) {
     if (on === this.frozen) return;
     this.frozen = on;
     if (on) {
+      this.lookCell = null;
+      leanToward(this.el, null, 0);
       clearTimeout(this.timer);
       this.once?.done();
       this.once = null;
@@ -338,7 +359,7 @@ class AtlasView implements PetView {
       const s = seq(this.moving === "left" ? "running-left" : "running-right");
       if (s.length) return s;
     }
-    if (this.lookCell && this.base === "idle") {
+    if (this.lookCell && LOOKS_AROUND.includes(this.base)) {
       return [{ row: this.lookCell[0], col: this.lookCell[1], ms: 400 }];
     }
     const rest = (row: number, col: number, min: number, max: number) => ({ row, col, ms: rand(min, max) });
@@ -498,17 +519,10 @@ class ImageView implements PetView {
     // away, less when it's on the pet itself.
     if (to) this.rig?.look(to.x / Math.max(d, this.height), to.y / Math.max(d, this.height));
     else this.rig?.look(0, 0);
-    // The body leans toward it while it's close (a little, when the eyes do the looking).
-    if (!to || d < this.width * 0.45 || d > NEAR || "frozen" in this.el.dataset) {
-      this.lookLayer.style.translate = "";
-      this.lookLayer.style.rotate = "";
-      return;
-    }
-    const lean = this.rig ? 0.5 : 1;
-    const ux = to.x / d;
-    const uy = to.y / d;
-    this.lookLayer.style.translate = `${(ux * 5 * lean).toFixed(1)}px ${(uy * 3 * lean).toFixed(1)}px`;
-    this.lookLayer.style.rotate = `${(ux * 7 * lean).toFixed(1)}deg`;
+    // The body leans toward it. Without eyes that's how it looks, so wherever the cursor is;
+    // with eyes (which already follow), just a little while the cursor is close by.
+    const watching = to !== null && d > this.width * 0.45 && !("frozen" in this.el.dataset);
+    leanToward(this.lookLayer, watching ? to : null, this.rig ? (d < NEAR ? 0.5 : 0) : 1);
   }
 
   destroy() {

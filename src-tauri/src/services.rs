@@ -14,9 +14,11 @@
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::webview::{NewWindowResponse, PageLoadEvent};
+use tauri::webview::{Cookie, NewWindowResponse, PageLoadEvent};
 use tauri::{AppHandle, Emitter, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
+
+use crate::vault;
 
 /// Gradescope's regional sites.
 const GRADESCOPE_SITES: &[&str] = &["www.gradescope.com", "www.gradescope.ca", "www.gradescope.eu", "www.gradescope.com.au"];
@@ -26,7 +28,7 @@ const ED_REGIONS: &[(&str, &str)] = &[
     ("eu", "https://eu.edstem.org/api"),
     ("au", "https://edstem.org/api"),
 ];
-const ED_KEYCHAIN_USER: &str = "ed-token";
+const ED_TOKEN: &str = "ed-token";
 const USER_AGENT: &str =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) StudyPet/0.1";
 const MAX_PAGE_BYTES: usize = 8 * 1024 * 1024;
@@ -84,6 +86,14 @@ fn target_url(svc: &Service, url: Option<&str>) -> Result<Url, String> {
 pub async fn open_service(app: AppHandle, name: String, url: Option<String>) -> Result<(), String> {
     let svc = service(&name)?;
     let target = target_url(&svc, url.as_deref())?;
+    if svc.key == "gradescope" {
+        // Still logged in after a restart: put the saved login back first.
+        if let Some(site) = target.host_str().map(|h| if h.starts_with("www.") { h.to_string() } else { format!("www.{h}") }) {
+            if GRADESCOPE_SITES.contains(&site.as_str()) {
+                let _ = login_cookies(&app, &site);
+            }
+        }
+    }
     let label = format!("web-{}", svc.key);
     if let Some(w) = app.get_webview_window(&label) {
         w.navigate(target).map_err(|e| e.to_string())?;
@@ -129,7 +139,11 @@ pub struct Page {
 #[tauri::command]
 pub async fn gradescope_fetch(app: AppHandle, site: String, path: String) -> Result<Page, String> {
     let url = gradescope_url(&site, &path)?;
-    let cookie = session_cookie(&app, &url)?;
+    let cookie = login_cookies(&app, &site)?
+        .iter()
+        .map(|c| format!("{}={}", c.name(), c.value()))
+        .collect::<Vec<_>>()
+        .join("; ");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .user_agent(USER_AGENT)
@@ -146,7 +160,78 @@ pub async fn gradescope_fetch(app: AppHandle, site: String, path: String) -> Res
     if html.len() > MAX_PAGE_BYTES {
         return Err("Gradescope 页面太大了".into());
     }
+    // The dashboard came back logged in: keep this login for after a restart.
+    if path == "/" && status == 200 && html.contains("id=\"account-show\"") {
+        remember_login(&app, &site);
+    }
     Ok(Page { url: final_url, status, html })
+}
+
+/// Forgets the saved Gradescope login (when Gradescope is disconnected).
+#[tauri::command]
+pub async fn gradescope_forget() -> Result<(), String> {
+    for site in GRADESCOPE_SITES {
+        vault::delete(&login_key(site))?;
+    }
+    Ok(())
+}
+
+fn login_key(site: &str) -> String {
+    format!("gradescope:{site}")
+}
+
+fn any_webview(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    app.get_webview_window("web-gradescope")
+        .or_else(|| app.get_webview_window("pet"))
+        .or_else(|| app.get_webview_window("panel"))
+}
+
+/// The Gradescope login cookies from the app's (shared) WebKit cookie store — or, when that
+/// is empty (the app was restarted: WebKit forgets session cookies on quit), the saved login,
+/// put back into WebKit so the built-in window is logged in too.
+fn login_cookies(app: &AppHandle, site: &str) -> Result<Vec<Cookie<'static>>, String> {
+    let url = Url::parse(&format!("https://{site}/")).map_err(|e| e.to_string())?;
+    let webview = any_webview(app).ok_or("no webview")?;
+    let live = webview.cookies_for_url(url).map_err(|e| e.to_string())?;
+    if !live.is_empty() {
+        return Ok(live);
+    }
+    let Some(json) = vault::get(&login_key(site))? else {
+        return Ok(live);
+    };
+    let saved: Vec<String> = serde_json::from_str(&json).unwrap_or_default();
+    let cookies: Vec<Cookie<'static>> = saved
+        .into_iter()
+        .filter_map(|s| Cookie::parse(s).ok())
+        .map(|mut c| {
+            // Pinned to this host: WebKit would read a bare "gradescope.com" as that host only.
+            c.set_domain(site.to_string());
+            if c.path().is_none() {
+                c.set_path("/");
+            }
+            c
+        })
+        .collect();
+    for c in &cookies {
+        let _ = webview.set_cookie(c.clone());
+    }
+    Ok(cookies)
+}
+
+fn remember_login(app: &AppHandle, site: &str) {
+    let Ok(url) = Url::parse(&format!("https://{site}/")) else {
+        return;
+    };
+    let Some(cookies) = any_webview(app).and_then(|w| w.cookies_for_url(url).ok()) else {
+        return;
+    };
+    if cookies.is_empty() {
+        return;
+    }
+    let saved: Vec<String> = cookies.iter().map(|c| c.to_string()).collect();
+    if let Ok(json) = serde_json::to_string(&saved) {
+        let _ = vault::set(&login_key(site), &json);
+    }
 }
 
 /// A page on one of Gradescope's sites; nothing else.
@@ -158,21 +243,6 @@ fn gradescope_url(site: &str, path: &str) -> Result<Url, String> {
         return Err("bad path".into());
     }
     Url::parse(&format!("https://{site}{path}")).map_err(|e| e.to_string())
-}
-
-/// The session cookies for a Gradescope page from the app's (shared) WebKit cookie store.
-fn session_cookie(app: &AppHandle, url: &Url) -> Result<String, String> {
-    let webview = app
-        .get_webview_window("web-gradescope")
-        .or_else(|| app.get_webview_window("pet"))
-        .or_else(|| app.get_webview_window("panel"))
-        .ok_or("no webview")?;
-    let cookies = webview.cookies_for_url(url.clone()).map_err(|e| e.to_string())?;
-    Ok(cookies
-        .iter()
-        .map(|c| format!("{}={}", c.name(), c.value()))
-        .collect::<Vec<_>>()
-        .join("; "))
 }
 
 #[derive(Serialize)]
@@ -198,9 +268,7 @@ pub async fn ed_connect(token: String, region: String) -> Result<EdConnected, St
     for r in order {
         match ed_get(r, token, "/user").await {
             Ok(user) => {
-                crate::sources::keychain_entry(ED_KEYCHAIN_USER)?
-                    .set_password(token)
-                    .map_err(|e| e.to_string())?;
+                vault::set(ED_TOKEN, token)?;
                 return Ok(EdConnected { region: r.to_string(), user });
             }
             Err(e) => {
@@ -213,10 +281,7 @@ pub async fn ed_connect(token: String, region: String) -> Result<EdConnected, St
 
 #[tauri::command]
 pub async fn ed_disconnect() -> Result<(), String> {
-    match crate::sources::keychain_entry(ED_KEYCHAIN_USER)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(e.to_string()),
-    }
+    vault::delete(ED_TOKEN)
 }
 
 #[tauri::command]
@@ -240,9 +305,7 @@ fn ed_api(region: &str) -> Result<&'static str, String> {
 }
 
 fn ed_token() -> Result<String, String> {
-    crate::sources::keychain_entry(ED_KEYCHAIN_USER)?
-        .get_password()
-        .map_err(|_| "还没有连接 Ed".to_string())
+    vault::get(ED_TOKEN)?.ok_or_else(|| "还没有连接 Ed".to_string())
 }
 
 async fn ed_get(region: &str, token: &str, path: &str) -> Result<String, String> {
