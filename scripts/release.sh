@@ -41,11 +41,12 @@ APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/StudyPet.app"
 codesign --force --deep --sign - "$APP"
 codesign --verify --deep --strict "$APP"
 
-# 3. Zip it the Mac way (keeps the bundle intact).
+# 3. Zip it the Mac way (keeps the bundle intact), without macOS file metadata: that would
+#    travel as "._" files, which plain unzip tools leave inside the app and break its seal.
 mkdir -p release
 ZIP="release/StudyPet-$VERSION-macos.zip"
 rm -f "$ZIP"
-ditto -c -k --keepParent "$APP" "$ZIP"
+ditto -c -k --norsrc --noextattr --keepParent "$APP" "$ZIP"
 
 # 4. Record the release in the private repo, then publish only the zip.
 git commit -qam "Release v$VERSION" || true
