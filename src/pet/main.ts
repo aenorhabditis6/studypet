@@ -620,6 +620,12 @@ async function wireEvents() {
     void Promise.resolve(MENU_ACTIONS[id]?.()).catch((e) => log(`menu ${id} failed:`, errorText(e)));
   });
   await listen("data-updated", () => void refresh());
+  // StudyPet was opened again while running: come out and say hi.
+  await listen("pet-summon", async () => {
+    await motion.untuck();
+    play("waving", 2);
+    speak(lines.greeting(current));
+  });
   await listen("sync-request", () => void sync("panel"));
   await listen<[string, string]>("service-page", ([service, url]) => onServicePage(service, url));
   await listen<string>("focus-blocked", (app) =>

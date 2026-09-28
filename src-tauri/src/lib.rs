@@ -64,6 +64,19 @@ fn toggle_pet(app: &AppHandle) {
     }
 }
 
+/// Opening StudyPet again while it runs (Spotlight, Launchpad, the Dock) calls the pet out:
+/// shown if hidden, back out of meeting mode if tucked away.
+fn summon_pet(app: &AppHandle) {
+    if !pet::has_pet(app) {
+        open_panel(app, Some("onboarding"));
+        return;
+    }
+    if let Some(w) = app.get_webview_window("pet") {
+        let _ = w.show();
+        let _ = app.emit_to("pet", "pet-summon", ());
+    }
+}
+
 #[tauri::command]
 fn show_panel(app: AppHandle, view: Option<String>) {
     open_panel(&app, view.as_deref());
@@ -209,6 +222,14 @@ pub fn run() {
             }
             _ => {}
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                summon_pet(app);
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
+        });
 }
